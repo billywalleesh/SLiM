@@ -45,7 +45,6 @@ To reproduce key results:
    Rscript scripts/analysis.R
    ```
 
-*(Update these commands as your workflow develops)
 ---
 
 ## Tools & Skills
