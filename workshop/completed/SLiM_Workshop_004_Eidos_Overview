@@ -11,15 +11,32 @@ initialize() {
 1 early() {
 	for (i in 0:(COUNT-1))
 		sim.addSubpop(i, 500);
-	
+
 	subpops = sim.subpopulations;
 	for (i in 1:(COUNT-1)) subpops[i].setMigrationRates(i-1, 0.2);
 	for (i in 0:(COUNT-2)) subpops[i].setMigrationRates(i+1, 0.05);
 }
 
-5000 late() {
-s = sample(sim.mutations, 20);
-s.setSelectionCoeff(0.05);
+//5000 late() {
+//s = sample(sim.mutations, 20);
+//s.setSelectionCoeff(0.05);
+//}
+
+500*COUNT late() {
+s = sample(sim.mutations, 200);
+s.setSelectionCoeff(-0.01);
 }
 
-10000 late() { sim.outputFixedMutations(); }
+//	// the easy way:
+//	//sim.mutations.setSelectionCoeff(0.0);
+//
+
+//	// the hard way:
+//5050 late () {
+//muts = sim.mutations ;
+//selective = muts[muts.selectionCoeff > 0.0];
+//selective.setSelectionCoeff(0.0);
+//}
+
+
+500*COUNT+5000 late() { sim.outputFixedMutations(); }
