@@ -1,0 +1,94 @@
+// set up a simple neutral simulation
+initialize() {
+	//try to always define constatnts in the initialize area (count, size, etc) capital letters 			are global
+	defineConstant("SIM_ID", getSeed());
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	// introduced mutation 1.0 = dominance coefficient 0.5 = selection coefficient (0.5 = strongly 	beneficial. (1.0 = fully dominant).	
+	initializeMutationType("m2", 1.0, "f", 0.01);
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	initializeRecombinationRate(1e-8);
+}
+// create a population of 500 individuals
+1 early() {
+	sim.addSubpop("p1", 500);
+}
+//1000 late() {
+//	target = sample(p1.haplosomes, 1);
+//target.addNewDrawnMutation(m2, 10000);
+//	defineConstant("CHECKPOINT", tempdir() + "slim_" + SIM_ID + ".txt");
+//	mut = target.addNewDrawnMutation(m2, 10000);
+//	defineConstant("SWEEP", mut);
+//	sim.outputFull(CHECKPOINT, binary=T, substitutions=T);
+//}
+
+//1000:100000 late() {
+//added constatnt SWEEP to not have to call the sweep mutations every time, just call 					constatnt SWEEP
+//sweep = sim.mutationsOfType(m2);
+//if (size(sweep) == 0)
+//{
+//	if (!SWEEP.isSegregating)
+//	{
+//		if (SWEEP.isFixed)
+//		{
+//			if (any(sim.substitutions.mutationType == m2))
+//			{
+//				cat(SIM_ID + ": FIXED\n");
+//				sim.simulationFinished();
+//			}
+//			else
+//			{
+//				cat(SIM_ID + ": LOST - RESTARTING\n");
+//				sim.readFromPopulationFile(CHECKPOINT);
+//				defineConstant("SWEEP", sim.mutationsOfType(m2));
+//			}
+//		}
+//		else
+//		{
+//			freq = sim.mutationFrequencies(NULL, SWEEP);
+//			catn(sim.cycle + ": " + freq);
+//		}
+//	}
+//}
+
+//exercise 1
+1000 late() {
+	seg_mut = sample(sim.mutations, 1);
+	target = seg_mut;
+	defineConstant("SWEEP", target);
+	SWEEP.setMutationType(m2);
+	SWEEP.setSelectionCoeff(0.1);
+	defineConstant("CHECKPOINT", tempdir() + "slim_" + SIM_ID + ".txt");
+	sim.outputFull(CHECKPOINT, binary=T, substitutions=T);
+}
+
+
+1000:100000 late() {
+	if (!SWEEP.isSegregating)
+	{
+		if (SWEEP.isFixed)
+		{
+			cat(SIM_ID + ": FIXED\n");
+			sim.simulationFinished();
+		}
+		else
+		{
+			cat(SIM_ID + ": LOST - RESTARTING\n");
+			sim.readFromPopulationFile(CHECKPOINT);
+			defineConstant("SWEEP", sim.mutationsOfType(m2));
+		}
+	}
+	else
+	{
+		freq = sim.mutationFrequencies(NULL, SWEEP);
+		catn(sim.cycle + ": " + freq);
+	}
+}
+
+
+100000 late() {
+	catn("TIME EXPIRED");
+	sim.simulationFinished();
+}
+
