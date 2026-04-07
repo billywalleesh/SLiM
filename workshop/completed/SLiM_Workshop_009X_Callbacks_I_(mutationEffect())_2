@@ -1,0 +1,22 @@
+//initialize starting parameters
+initialize() {
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0); //neutral 
+	initializeMutationType("m2", 0.5, "f", 0.1); // balanced (idk what that means) 
+	initializeGenomicElementType("g1", c(m1, m2), c(99999, 1));
+	initializeGenomicElement(g1, 0, 99999);
+	initializeRecombinationRate(1e-8);
+}
+1 early() {sim.addSubpop("p1", 500);}
+100000 early() {sim.simulationFinished();}
+mutationEffect(m2) {
+	return 1.5 - sim.mutationFrequencies(p1, mut);
+}
+
+mutationEffect(m2) {
+	if (homozygous)
+		return 1.25 - sim.mutationFrequencies(p1, mut);
+	else
+		return 1.25 - 0.5 * sim.mutationFrequencies(p1, mut);
+}
+
