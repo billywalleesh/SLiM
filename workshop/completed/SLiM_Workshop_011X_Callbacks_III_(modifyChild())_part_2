@@ -1,5 +1,5 @@
 initialize() {
-	initializeMutationRate(1e-7);
+	initializeMutationRate(0.0);
 	initializeMutationType("m1", 0.5, "f" , 0.0); //neutral
 	initializeMutationType("m2", 0.5 , "f", 0.1); //lactase promoting (helps in milk digestion)
 	m2.convertToSubstitution = F;

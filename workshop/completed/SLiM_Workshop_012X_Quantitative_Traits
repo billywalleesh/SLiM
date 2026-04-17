@@ -1,0 +1,91 @@
+function (void)dumpFrequencies(object<Mutation> muts) {
+	if (muts.size())
+	{
+		freqs = sim.mutationFrequencies(NULL, muts);
+		coeffs = muts.selectionCoeff;
+		catn();
+		print(cbind(freqs, coeffs));
+	}
+}
+
+initialize() {
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0); //neutral
+	initializeMutationType("m2", 0.5, "n", 0.0, 0.5); //QTls DFE normal dist 0.5 0.0 = Mu & SD
+	m2.convertToSubstitution = F ;
+	initializeGenomicElementType("g1" , m1, 1);
+	initializeGenomicElementType("g2", c(m1, m2), c(0.9, 0.1));
+	initializeGenomicElement(g1, 0, 20000);
+	initializeGenomicElement(g2, 20001, 30000);
+	initializeGenomicElement(g1, 30001, 99999);
+	initializeRecombinationRate(1e-8);
+}
+
+mutationEffect(m2) { return 1.0;}
+modifyChild() {
+	// phenotypic plasticity as a developmental bias determined
+	// at the point of offspring generation; note that this
+	// implementation is inefficient, with many redundant
+	// calculations, but it's conceptually clear...
+	opt = (floor(sim.cycle / 10000) % 2) * 10.0;
+	additive = child.sumOfMutationsOfType(m2);
+	child.tag = asInteger(round((opt - additive) / 5));
+	return T;
+}
+
+1 early() {
+	sim.addSubpop("p1", 500);
+}
+
+1: late() {
+	//The quantiles are the phenotypic trait values
+	//the mean of the normal distribution is the
+	//optimum of stabilizing selection on this phenotypic trait (10.0 and 			//"opt" here) “width” of the fitness function (5.0 here)
+	//The result is multiplied by 10.0 (to produce the desired strength of 			//selection), and then is 	//added to 1.0 (making individuals that are 			//infinitely far from the phenotypic optimum have a 		
+	//fitness of 1.0).
+	inds = sim.subpopulations.individuals;
+	opt = (floor(sim.cycle / 10000) % 2) * 10.0;
+	additive = inds.sumOfMutationsOfType(m2);
+	noise = rnorm(500, 0.0, 10.0);
+	phenotypes = additive + noise;
+	heritability = var(additive) / var(phenotypes); 
+	inds.fitnessScaling = 1.0 + dnorm(phenotypes, opt, 5.0) * 10;
+	
+	// Output periodically
+	if (sim.cycle % 100 == 0)
+	{
+		current_optimum = opt;
+		mean_phenotype = mean(phenotypes);
+		catn(sim.cycle + ": Mean phenotype == " + mean_phenotype + " (optimum == " + opt + ")" + " (h == " + heritability + ")");
+	}
+}
+
+100000 late(){
+	dumpFrequencies(sim.mutationsOfType(m2));
+}
+
+
+//Exercise 1
+//	mean_phenotype = mean(phenotypes);
+//	if (abs(mean_phenotype - 10.0) < 0.1)
+//	{
+//		catn("\n" + sim.cycle + ": REACHED OPTIMUM");
+//		catn("Final phenotype == " + mean_phenotype);
+//		dumpFrequencies(sim.mutationsOfType(m2));
+//		sim.simulationFinished();
+//	}
+//	else if (sim.cycle % 100 == 0)
+//	{
+//		catn(sim.cycle + ": Mean phenotype == " + mean_phenotype);
+//	}
+//}
+
+//20000 late() {
+//	catn("\nDid not reach optimum");
+//	dumpFrequencies(sim.mutationsOfType(m2));
+
+//}
+
+
+
+
