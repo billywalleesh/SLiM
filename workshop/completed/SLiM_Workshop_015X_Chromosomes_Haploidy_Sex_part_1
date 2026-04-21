@@ -1,0 +1,45 @@
+initialize() {
+	initializeSex();
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeGenomicElementType("g1", m1, 1.0);
+	for (id in 1:4, length in c(1e5,7e4, 1e6, 1e6),
+		type in c("A", "A", "X", "Y"), 
+		symbol in c("A1", "A2", "X", "Y"), 
+		mut_rate in c(1e-6, 1e-8, 1e-7, 1e-8))
+	{
+		initializeChromosome(id, length, type, symbol);
+		initializeGenomicElement(g1);
+		initializeMutationRate(mut_rate);
+		initializeRecombinationRate(1e-8);
+	}
+
+}
+
+
+//	initializeChromosome(1, 1e5);
+//	initializeGenomicElement(g1);
+//	initializeMutationRate(1e-7);
+//	initializeRecombinationRate(1e-8);
+
+//	initializeChromosome(2, 7e4);
+//	initializeGenomicElement(g1);
+//	initializeMutationRate(1e-7);
+//	initializeRecombinationRate(1e-8);
+
+//	initializeChromosome(3, 1e6, "X", "X");
+//	initializeGenomicElement(g1);
+//	initializeMutationRate(1e-7);
+//	initializeRecombinationRate(1e-8);
+
+//	initializeChromosome(4, 1e6, "Y", "Y");
+//	initializeGenomicElement(g1);
+//	initializeMutationRate(1e-7);
+
+
+1 early(){
+	sim.addSubpop("p1", 500);
+}
+
+2000 late() {
+	sim.outputFixedMutations();
+}

@@ -1,0 +1,38 @@
+initialize() {
+	defineConstant("K", 2000);
+	initializeSLiMModelType("nonWF");
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeGenomicElementType("g1", m1, 1.0);
+	m1.convertToSubstitution = T;
+	
+	initializeChromosome(1, 2e6, "H");
+	initializeGenomicElement(g1);
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+}
+//reproduction()
+//{
+//	p1.addCloned(individual);
+//}
+reproduction()
+{
+parents = p1.sampleIndividuals(K, replace=T);
+for (parent in parents)
+p1.addCloned(parent);
+// we've done the reproduction for this tick, so deactivate ourselves
+self.active = 0;
+}
+
+1 early() {
+	sim.addSubpop("p1", K);
+}
+
+//early() {
+//p1.fitnessScaling = K / p1.individualCount;
+//}
+
+early() {
+	inds = sim.subpopulations.individuals;
+	inds[inds.age > 0].fitnessScaling = 0.0;
+}
+10000 late() { sim.outputFixedMutations(); }
