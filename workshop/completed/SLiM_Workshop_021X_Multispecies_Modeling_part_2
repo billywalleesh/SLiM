@@ -1,0 +1,175 @@
+species all initialize() {
+	defineConstant("K_mouse", 5000);		// carrying capacity
+	defineConstant("K_fox", 500);			// initial pop size
+	defineConstant("F_mouse", 10);		// fecundity
+	defineConstant("F_fox", 2);			// fecundity
+	defineConstant("D_mouse", 0.02);		// dispersal radius
+	defineConstant("D_fox", 0.05);		// dispersal radius
+	defineConstant("M_mouse", 0.02);		// mating radius
+	defineConstant("M_fox", 0.05);		// mating radius
+	defineConstant("C_mouse", 0.02);		// competition radius
+	defineConstant("H_fox", 0.05);		// hunting radius
+	defineConstant("HUNTS", 10);			// number of hunts for foxes
+	defineConstant("MATCH_SCALE", 0.5);	// scaling for visual matching
+	
+	initializeSLiMModelType("nonWF");
+	
+	// fixed-strength interactions for mating; choose with equal probability
+	initializeInteractionType("i1", "xy", maxDistance=M_mouse);
+	initializeInteractionType("i2", "xy", maxDistance=M_fox);
+	
+	// mouse competition uses a normal kernel
+	initializeInteractionType("i3", "xy", maxDistance=C_mouse * 3);
+	i3.setInteractionFunction("n", 1.0, C_mouse);
+	
+	// fox hunting uses a normal kernel too
+	initializeInteractionType("i4", "xy", maxDistance=H_fox * 3);
+	i4.setInteractionFunction("n", 1.0, H_fox);
+}
+species mouse initialize() {
+	initializeSpecies(avatar="🐭", color="black");
+	initializeSLiMOptions(dimensionality="xy", periodicity="xy");
+	initializeMutationType("m1", 0.5, "f", 0.0);		// coat-color locus
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 0);
+	initializeMutationRate(0.0);
+	initializeRecombinationRate(0.0);
+}
+species fox initialize() {
+	initializeSpecies(avatar="🦊", color="orange");
+	initializeSLiMOptions(dimensionality="xy", periodicity="xy");
+	initializeMutationType("m2", 0.0, "n", 0.0, 0.1);	// hunting
+	m2.convertToSubstitution = F;
+	m2.mutationStackPolicy = "l";
+	initializeGenomicElementType("g2", m2, 1.0);
+	initializeGenomicElement(g2, 0, 99);				// 100 QTLs
+	initializeMutationRate(1e-5);							// 1e-3 per gamete
+	initializeRecombinationRate(0.5);					// unlinked
+}
+
+species fox mutationEffect(m2) {
+	return 1.0;					// QTLs are neutral
+}
+
+ticks all 2: first()
+{
+	// evaluate mating interactions
+	i1.evaluate(p1);
+	i2.evaluate(p2);
+}
+
+species mouse reproduction()
+{
+	mate = i1.drawByStrength(individual, 1);
+	if (size(mate))
+	{
+		litterSize = rpois(1, F_mouse);
+		offspring = subpop.addCrossed(individual, mate, count=litterSize);
+	}
+}
+species fox reproduction()
+{
+	mate = i2.drawByStrength(individual, 1);
+	if (size(mate))
+	{
+		fecundity = F_fox * (individual.tag / HUNTS);
+		litterSize = rpois(1, fecundity);
+		offspring = subpop.addCrossed(individual, mate, count=litterSize);
+	}
+}
+
+ticks all 2: early()
+{
+	// dispersal for new offspring, vectorized
+	juveniles = p1.subsetIndividuals(maxAge=0);
+	p1.deviatePositions(juveniles, "periodic", INF, "n", D_mouse);
+	
+	juveniles = p2.subsetIndividuals(maxAge=0);
+	p2.deviatePositions(juveniles, "periodic", INF, "n", D_fox);
+}
+
+ticks all 1 early() {
+	mouse.addSubpop("p1", K_mouse);
+	targets = sample(p1.haplosomes, K_mouse);
+	targets.addNewDrawnMutation(m1, 0);
+	
+	fox.addSubpop("p2", K_fox);
+	p2.haplosomes.addNewMutation(m2, 0.25, 0);
+	for (i in 1:50)
+	{
+		target = sample(p2.haplosomes, rdunif(1, 0, K_fox*2));
+		target.addNewDrawnMutation(m2, rdunif(1, 1, 99));
+	}
+	
+	p1.individuals.setSpatialPosition(p1.pointUniform(K_mouse));
+	p2.individuals.setSpatialPosition(p2.pointUniform(K_fox));
+}
+
+ticks mouse early() {
+	i3.evaluate(p1);
+	
+	// spatial competition provides density-dependent selection
+	inds = p1.individuals;
+	competition = i3.localPopulationDensity(inds);
+	inds.fitnessScaling = K_mouse / competition;
+}
+
+ticks fox late() {
+	// use tagF to hold individual phenotypes
+	mice = p1.individuals;
+	pheno = mice.countOfMutationsOfType(m1) / 2;
+	mice.tagF = pheno;
+	mice.color = colorsForPhenotypes(pheno);
+	
+	foxes = p2.individuals;
+	pheno = foxes.sumOfMutationsOfType(m2);
+	foxes.tagF = pheno;
+	foxes.color = colorsForPhenotypes(pheno);
+	
+	// hunting: use tag values to track what happens
+	// for mice: 0 means alive, 1 means killed
+	// for foxes: the tag value is the number of mice killed
+	c(p1, p2).individuals.tag = 0;
+	
+	// the foxes hunt in randomized order
+	foxes = p2.sampleIndividuals(p2.individualCount);
+	i4.evaluate(c(p1, p2));
+	
+	for (hunter in foxes)
+	{
+		local_mouse_density = i4.localPopulationDensity(hunter, p1);
+		p_kill = min(1.0, local_mouse_density / K_mouse);
+		kill_count = rbinom(1, HUNTS, p_kill);
+		killed = i4.drawByStrength(hunter, kill_count, p1);
+		killed = killed[killed.tag == 0];
+		match = 1.0 - abs(hunter.tagF - killed.tagF) * MATCH_SCALE;
+		match = pmax(pmin(match, 1.0), 0.0);
+		killed = killed[runif(size(killed)) < match];
+		killed.tag = 1;
+		hunter.tag = size(killed);
+	}
+	
+	all_killed = p1.subsetIndividuals(tag=1);
+	mouse.killIndividuals(all_killed);
+	
+	p_fox_survival = foxes.tag / HUNTS;
+	starved = runif(foxes.size()) > p_fox_survival;
+	fox.killIndividuals(foxes[starved]);
+}
+
+ticks all 500 late() {
+}
+
+function (string)colorsForPhenotypes(float pheno)
+{
+	if (size(pheno) == 0)
+		return string(0);
+	
+	w1 = 1.0 - pheno;
+	w2 = pheno;
+	r = 0.96 * w1 + 0.54 * w2;
+	g = 0.87 * w1 + 0.45 * w2;
+	b = 0.70 * w1 + 0.33 * w2;
+	rgb = cbind(r, g, b);
+	return rgb2color(rgb);
+}
