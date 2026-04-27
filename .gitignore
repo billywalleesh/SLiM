@@ -8,8 +8,8 @@ workshop/original/
 results/
 
 # Data (optional – uncomment if large)
-# data/raw/
-# data/processed/
+data/raw/
+data/processed/
 
 # Python
 __pycache__/
