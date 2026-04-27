@@ -1,0 +1,29 @@
+// set up a simple neutral simulation
+initialize() {
+	initializeSLiMOptions(nucleotideBased=T);
+	defineConstant("L", 1e2);
+	s = randomNucleotides(L);
+	print(s);
+	initializeAncestralNucleotides(s);
+	
+	
+	// m1 mutation type: neutral
+	initializeMutationTypeNuc("m1", 0.5, "f", 0.0);   //nucleotide mutation type
+	
+	// g1 genomic element type: uses m1 for all mutations
+	initializeGenomicElementType("g1", m1, 1.0, mmJukesCantor(1e-4 / 3));
+	
+	// uniform chromosome of length 100 kb with uniform recombination
+	initializeGenomicElement(g1, 0, (L-1));
+	initializeRecombinationRate(1e-8);
+}
+
+// create a population of 500 individuals
+1 early() {
+	sim.addSubpop("p1", 500);
+}
+
+// output samples of 10 haplosomes periodically, all fixed mutations at end
+1000 late() { p1.outputSample(10); }
+2000 late() { p1.outputSample(10); }
+5000 late() { sim.outputFixedMutations(); }
