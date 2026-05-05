@@ -1,0 +1,169 @@
+//building on v2 by adding 4 popultaions with migration rates 
+//initialize the model 
+//set effective population size to 500
+// opt 1 and 2 represent the phenotypic optimum before and after environmental change
+//m1 mutations create a QTL which is drawn from a normal distribution centered on 0.0 with a standard deviation of 1.0.
+//tdelta is when the disturbance will occur
+initialize()
+{
+	initializeSLiMModelType("nonWF");
+	defineConstant("Ne", 500); // effective population size per subpop
+	defineConstant("N", 4); // number of subpopulations
+	defineConstant("m", 0.01); // migration rate
+	defineConstant("e", 0.1); // subpopulation extinction rate
+	defineConstant("opt1", 0.0);
+	defineConstant("opt2", 10.0);
+	defineConstant("Tdelta", 10000);
+	initializeMutationType("m1", 0.5, "n", 0.0, 1.0); // QTL
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+}
+
+//generate one offspring per focal individual in each tick
+reproduction()
+{
+	subpop.addCrossed(individual, subpop.sampleIndividuals(1));
+}
+
+//add 4 populations with 500 individuals
+1 early()
+{
+	for (i in 1:N)
+		sim.addSubpop(i, (i == 1) ? 10 else 0);
+}
+
+early()
+{
+	// random migration
+	nIndividuals = sum(sim.subpopulations.individualCount);
+	nMigrants = rpois(1, nIndividuals * m);
+	migrants = sample(sim.subpopulations.individuals, nMigrants);
+	for (migrant in migrants)
+	{
+		do
+			dest = sample(sim.subpopulations, 1);
+		while (dest == migrant.subpopulation);
+		dest.takeMigrants(migrant);
+	}
+}
+
+early()
+{
+	// QTL-based fitness
+	inds = sim.subpopulations.individuals;
+	
+	//phenotypes as the sum of the effects of all QTLs possessed by the individual
+	phenotypes = inds.sumOfMutationsOfType(m1);
+	
+	//which phenotypic optimum is in effect
+	optimum = (sim.cycle < Tdelta) ? opt1 else opt2;
+	
+	//calculate the deviation of each individual from the optimum
+	deviations = optimum - phenotypes;
+	
+	//calculate the degree of adaptation of each individual using a normal dist to show deviation from optimum divided by max fitness if they are better or worse abdapted based on phenotype
+	//fitnessFunctionMax normalizes the adaptation values to the range (0,1)
+	fitnessFunctionMax = dnorm(0.0, 0.0, 5.0);
+	adaptation = dnorm(deviations, 0.0, 5.0) / fitnessFunctionMax;
+	
+	//perfectly adapted individual will have an adaptation value of 1.0
+	//0.1 = “floor”
+	inds.fitnessScaling = 0.1 + adaptation * 0.9;
+	inds.tagF = phenotypes; // just for output below
+	
+	// density-dependence with a maximum benefit at low density
+	sim.subpopulations.fitnessScaling = min(Ne / sim.subpopulations.individualCount, 1.5);
+}
+
+//makes the direct fitness effect of m1 mutations neutral (QTL mutations on fitness is indirect)
+mutationEffect(m1)
+{
+	return 1.0;
+}
+
+late()
+{
+	if (p1.individualCount == 0)
+	{
+		// stop at extinction
+		catn("Population 1 Extinction in cycle " + sim.cycle + ".");
+	
+	}
+	else
+	{
+		// output the phenotypic mean and pop size
+		phenotypes_p1 = p1.individuals.tagF;
+		cat(sim.cycle + " p1: " + p1.individualCount + " individuals");
+		cat(", phenotype mean " + mean(phenotypes_p1));
+		if (size(phenotypes_p1) > 1)
+			cat(" (sd " + sd(phenotypes_p1) + ")");
+		catn();
+	}
+}
+
+late()
+{
+	if (p2.individualCount == 0)
+	{
+		// stop at extinction
+		catn("Population 2 Extinction in cycle " + sim.cycle + ".");
+	
+	}
+	else
+	{
+		// output the phenotypic mean and pop size
+		phenotypes_p2 = p2.individuals.tagF;
+		cat(sim.cycle + " p2: " + p2.individualCount + " individuals");
+		cat(", phenotype mean " + mean(phenotypes_p2));
+		if (size(phenotypes_p2) > 1)
+			cat(" (sd " + sd(phenotypes_p2) + ")");
+		catn();
+	}
+}
+
+late()
+{
+	if (p3.individualCount == 0)
+	{
+		// stop at extinction
+		catn("Population 3 Extinction in cycle " + sim.cycle + ".");
+	
+	}
+	else
+	{
+		// output the phenotypic mean and pop size
+		phenotypes_p3 = p3.individuals.tagF;
+		cat(sim.cycle + " p3: " + p3.individualCount + " individuals");
+		cat(", phenotype mean " + mean(phenotypes_p3));
+		if (size(phenotypes_p3) > 1)
+			cat(" (sd " + sd(phenotypes_p3) + ")");
+		catn();
+	}
+}
+
+late()
+{
+	if (p4.individualCount == 0)
+	{
+		// stop at extinction
+		catn("Population 4 Extinction in cycle " + sim.cycle + ".");
+	
+	}
+	else
+	{
+		// output the phenotypic mean and pop size
+		phenotypes_p4 = p4.individuals.tagF;
+		cat(sim.cycle + " p4: " + p4.individualCount + " individuals");
+		cat(", phenotype mean " + mean(phenotypes_p4));
+		if (size(phenotypes_p4) > 1)
+			cat(" (sd " + sd(phenotypes_p4) + ")");
+		catn();
+	}
+}
+
+20000 late()
+{
+	sim.simulationFinished();
+}

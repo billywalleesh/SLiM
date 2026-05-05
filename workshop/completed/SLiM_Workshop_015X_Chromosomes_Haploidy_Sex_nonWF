@@ -16,11 +16,11 @@ initialize() {
 //}
 reproduction()
 {
-parents = p1.sampleIndividuals(K, replace=T);
-for (parent in parents)
-p1.addCloned(parent);
-// we've done the reproduction for this tick, so deactivate ourselves
-self.active = 0;
+	parents = p1.sampleIndividuals(K, replace=T);
+	for (parent in parents)
+		p1.addCloned(parent);
+	// we've done the reproduction for this tick, so deactivate ourselves
+	self.active = 0;
 }
 
 1 early() {

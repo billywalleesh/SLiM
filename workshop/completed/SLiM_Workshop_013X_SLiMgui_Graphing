@@ -51,16 +51,16 @@ initialize() {
 
 10000 early()
 {
-if (exists("slimgui"))
-{
-subs = sim.substitutions;
-subs = subs[subs.mutationType == m4];
-timesToFix = subs.fixationTick - subs.originTick;
-coeffs = subs.selectionCoeff;
-plot = slimgui.createPlot("Fixation analysis",
-xrange=range(c(0, coeffs)), yrange=range(c(0, timesToFix)),
-xlab="Selection coefficient", ylab="Fixation time");
-plot.points(coeffs, timesToFix, symbol=16, size=0.6);
-}
-sim.simulationFinished();
+	if (exists("slimgui"))
+	{
+		subs = sim.substitutions;
+		subs = subs[subs.mutationType == m4];
+		timesToFix = subs.fixationTick - subs.originTick;
+		coeffs = subs.selectionCoeff;
+		plot = slimgui.createPlot("Fixation analysis",
+			xrange=range(c(0, coeffs)), yrange=range(c(0, timesToFix)),
+			xlab="Selection coefficient", ylab="Fixation time");
+		plot.points(coeffs, timesToFix, symbol=16, size=0.6);
+	}
+	sim.simulationFinished();
 }

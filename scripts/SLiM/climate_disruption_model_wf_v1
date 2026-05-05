@@ -1,0 +1,17 @@
+initialize() {
+	defineConstant("COUNT", 4); //number of populations
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	initializeRecombinationRate(1e-8);
+}
+1 early() {
+	for (i in 1:COUNT)
+		sim.addSubpop(i, 500);
+	for (i in 1:COUNT)
+		for (j in 1:COUNT)
+			if (i != j)
+				sim.subpopulations[i-1].setMigrationRates(j, 0.05);
+}
+10000 late() { sim.outputFixedMutations(); }
