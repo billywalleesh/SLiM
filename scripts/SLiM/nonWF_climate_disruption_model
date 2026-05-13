@@ -8,7 +8,7 @@ initialize()
 {
 	initializeSLiMModelType("nonWF");
 	defineConstant("Ne", 500); // effective population size per subpop
-	defineConstant("N", 1); // number of subpopulations
+	defineConstant("N", 4); // number of subpopulations
 	defineConstant("m", 0.01); // migration rate 
 	defineConstant("e", 0.1); // subpopulation extinction rate
 	defineConstant("opt1", 0.0); //optimum definition
