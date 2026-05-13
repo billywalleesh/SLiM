@@ -1,31 +1,36 @@
-//building on v2 by adding 4 popultaions with migration rates 
-//initialize the model 
-//set effective population size to 500
+//model with N populations, 3 mutation types, one creates neutral QTLs the other two create mutations that are beneficial in half of the populations and deleterious in the other half. The QTLs create a phenotypic additive affect that is neutral. Each population gains some phenotypic variance nuetrally for 10,000 ticks, while also accumulating deleterious and beneficial mutations. For 10,000 ticks the phenotypic optimum is 0. After a 10,000 tick burn in the phenotypic optimum shifts rapidly to 10,000. Which is to represent a climate disturbance.
 // opt 1 and 2 represent the phenotypic optimum before and after environmental change
 //m1 mutations create a QTL which is drawn from a normal distribution centered on 0.0 with a standard deviation of 1.0.
 //tdelta is when the disturbance will occur
+
+//initialize the model 
 initialize()
 {
 	initializeSLiMModelType("nonWF");
 	defineConstant("Ne", 500); // effective population size per subpop
-	defineConstant("N", 1); // number of subpopulations
-	defineConstant("m", 0.01); // migration rate 
-	defineConstant("e", 0.1); // subpopulation extinction rate
-	defineConstant("opt1", 0.0); //optimum definition
+	defineConstant("N", 2); // number of subpopulations
+//	defineConstant("m", 0.01); // migration rate 
+//	defineConstant("e", 0.1); // subpopulation extinction rate
+	//optimum definition
+	defineConstant("opt1", 0.0);
 	defineConstant("opt2", 10.0);
 	defineConstant("Tdelta", 10000);
-	initializeMutationType("m1", 0.5, "n", 0.0, 1.0); // QTL
-	initializeGenomicElementType("g1", m1, 1.0);
+	// QTL mutation type - Made nuetral in m1 mutation effect
+	initializeMutationType("m1", 0.5, "n", 0.0, 1.0);
+	//m2 and m3 will be used as beneficial and deleterious mutations using m2 and m3 mutation effect 
+	initializeMutationType("m2", 0.5, "e" , 0.01);
+	initializeMutationType("m3", 0.5, "e" , 0.01);
+	initializeGenomicElementType("g1" , c(m1, m2 , m3), c(1, 0.01, 0.01));
 	initializeGenomicElement(g1, 0, 99999);
 	initializeMutationRate(1e-7);
 	initializeRecombinationRate(1e-8);
 }
 
-//add 4 populations with 500 individuals
+//add N populations with individuals
 1 early()
 {
 	for (i in 1:N)
-		sim.addSubpop(i, 500);
+		sim.addSubpop(i, 10);
 }
 
 //add simple hermaphrodidic reproduction
@@ -82,11 +87,41 @@ early()
 	sim.subpopulations.fitnessScaling = min(Ne / sim.subpopulations.individualCount, 1.5);
 }
 
+//create a vectorized tag for upper and lower half of populations (skipped if only 1 pop)
+1 early()
+{
+	pops = sim.subpopulations;
+	pops.tag = 0;
+	
+	if (N > 1){
+		//store pops in a ordered vector and 	
+		sorted_pops = pops[order(pops.id)];
+		half = asInteger(N / 2);
+		//assign tags
+		sorted_pops[0:(half - 1)].tag = 1; // Lower half
+		sorted_pops[half:(N - 1)].tag = 2; // Upper half
+	}
+}
+
 //makes the direct fitness effect of m1 mutations neutral (QTL mutations on fitness is indirect)
 mutationEffect(m1)
 {
 	return 1.0;
 }
+
+//making m2 and m3 beneficial and deleterious in half of populations 
+mutationEffect(m2){
+	if (subpop.tag == 1)
+	{return 0.98 ;}
+	return effect;
+}
+
+mutationEffect(m3){
+	if (subpop.tag == 2)
+	{return 0.98 ;}
+	return effect;
+}
+
 
 late()
 {
