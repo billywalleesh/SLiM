@@ -1,4 +1,4 @@
-OUTDIR="/c/Users/WilliamWallisch/msc_workspace/SLiM/results/reps"
+OUTDIR="/c/Users/WilliamWallisch/msc_workspace/SLiM/data/raw"
 
 for N in 100 200 500 1000; do
     echo "Running with N == ${N}"
