@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUTDIR="/home/wwalli/msc_workspace/SLiM/results/reps"
+OUTDIR="/scratch/wwalli/reps/"
 MODEL="/home/wwalli/msc_workspace/SLiM/scripts/SLURM/rep.slim"
 
 mkdir -p "$OUTDIR"
@@ -8,7 +8,7 @@ mkdir -p "$OUTDIR"
 for N in 100 200 500 1000; do
     echo "Running with N == ${N}"
 
-    slim \
+    /home/wwalli/conda/envs/msc_env/bin/slim \
         -s 1 \
         -d MU=1e-7 \
         -d R=1e-8 \
