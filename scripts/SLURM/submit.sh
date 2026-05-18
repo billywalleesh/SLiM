@@ -7,7 +7,6 @@
 #SBATCH --error=console.err
 
 # Activate conda
-source /home/wwalli/conda/etc/profile.d/conda.sh
 conda activate msc_env
 
 # Move to working directory
