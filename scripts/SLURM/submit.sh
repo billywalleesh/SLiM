@@ -6,6 +6,9 @@
 #SBATCH --output=console.out
 #SBATCH --error=console.err
 
+#Init Conda 
+conda init
+
 # Activate conda
 conda activate msc_env
 
