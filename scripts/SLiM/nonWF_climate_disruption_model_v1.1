@@ -14,13 +14,14 @@ initialize()
 	defineConstant("opt1", 0.0); //optimum definition
 	defineConstant("opt2", 10.0);
 	defineConstant("Tdelta", 10000);
-	initializeMutationType("m0", 0.5, "f", 0.0); //neutral
+	//initializeMutationType("m0", 0.5, "f", 0.0); //neutral
 	initializeMutationType("m1", 0.5, "n", 0.0, 1.0); // QTL
 	initializeGenomicElementType("g1", m1, 1.0);
-	initializeGenomicElementType("g2", c(m0, m1), c(0.9, 0.1));
-	initializeGenomicElement(g1, 0, 20000);
-	initializeGenomicElement(g2, 20001, 30000);
-	initializeGenomicElement(g1, 30001, 99999);
+	//initializeGenomicElementType("g2", c(m0, m1), c(0.9, 0.1));
+	//initializeGenomicElement(g1, 0, 20000);
+	//initializeGenomicElement(g2, 20001, 30000);
+	//initializeGenomicElement(g1, 30001, 99999);
+	initializeGenomicElement(g1, 0, 99999);
 	initializeMutationRate(1e-7);
 	initializeRecombinationRate(1e-8);
 }
@@ -74,17 +75,19 @@ early()
 	deviations = optimum - phenotypes;
 	
 	//calculate the degree of adaptation of each individual using a normal dist to show deviation from optimum divided by max fitness if they are better or worse abdapted based on phenotype
-	//fitnessFunctionMax normalizes the adaptation values to the range (0,1)
+	//fitnessFunctionMax normalizes the adaptation values to the range (0,1) dividing my ffmax makes the adaptation capped at 1
 	fitnessFunctionMax = dnorm(0.0, 0.0, 5.0);
+	//This computes how close each individual is to the optimum
+	//ex dnorm(10.0, 0.0, 5.0)/0.0797885 = 0.14
 	adaptation = dnorm(deviations, 0.0, 5.0) / fitnessFunctionMax;
 	
-	//calculate the fitness effect for the individual as a function of the individual’s phenotype
+	//calculate the fitness effect for the individual as a function of the individual’s phenotype and adaptation 
 	//perfectly adapted individual will have an adaptation value of 1.0
 	//0.1 = “floor”
 	inds.fitnessScaling = 0.1 + adaptation * 0.9;
 	inds.tagF = phenotypes; // just for output below
 	
-	// density-dependence with a maximum benefit at low density
+	// density-dependence with a maximum benefit at low density (1.5 = density benefit limit)
 	sim.subpopulations.fitnessScaling = min(Ne / sim.subpopulations.individualCount, 1.5);
 }
 

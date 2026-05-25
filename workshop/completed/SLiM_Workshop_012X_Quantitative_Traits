@@ -39,10 +39,8 @@ modifyChild() {
 
 1: late() {
 	//The quantiles are the phenotypic trait values
-	//the mean of the normal distribution is the
-	//optimum of stabilizing selection on this phenotypic trait (10.0 and 			//"opt" here) “width” of the fitness function (5.0 here)
-	//The result is multiplied by 10.0 (to produce the desired strength of 			//selection), and then is 	//added to 1.0 (making individuals that are 			//infinitely far from the phenotypic optimum have a 		
-	//fitness of 1.0).
+	//the mean of the normal distribution is the optimum of stabilizing selection on this phenotypic trait (10.0 and 	 "opt" here) “width” of the fitness function (5.0 here)
+	//The result is multiplied by 10.0 (to produce the desired strength of selection), and then is added to 1.0 (making individuals that are infinitely far from the phenotypic optimum have a fitness of 1.0).
 	inds = sim.subpopulations.individuals;
 	opt = (floor(sim.cycle / 10000) % 2) * 10.0;
 	additive = inds.sumOfMutationsOfType(m2);
