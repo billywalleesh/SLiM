@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUTDIR="/scratch/wwalli/reps/"
+OUTDIR="/scratch/wwalli/TMP/reps/"
 MODEL="/home/wwalli/msc_workspace/SLiM/scripts/SLURM/rep.slim"
 
 mkdir -p "$OUTDIR"
