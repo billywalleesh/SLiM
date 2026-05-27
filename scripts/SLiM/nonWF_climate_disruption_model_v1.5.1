@@ -1,0 +1,234 @@
+/// evolutionary rescue model with multiple subpopulations
+/// nonWF QTL adaptation model with environmental change
+
+initialize()
+{
+	// use nonWF model
+	initializeSLiMModelType("nonWF");
+	
+	// demographic parameters
+	defineConstant("Ne", 500);     // carrying capacity per subpopulation
+	defineConstant("N", 4);        // number of subpopulations
+	
+	//defineConstant("m", 0.01);   // migration rate
+	//defineConstant("e", 0.1);    // extinction rate (future use)
+	
+	// environmental optima
+	//
+	// vectors scale automatically with N
+	// opt[0] corresponds to population 1
+	defineConstant("opt", asFloat(1:N));
+	defineConstant("opt_delta", asFloat((1:N) + 10));
+	
+	// timing of environmental shift
+	defineConstant("Tdelta", 10000);
+	
+	// QTL mutations
+	// effects drawn from N(0,1)
+	initializeMutationType("m1", 0.5, "n", 0.0, 1.0);
+	
+	// optional neutral mutation type
+	// initializeMutationType("m0", 0.5, "f", 0.0);
+	
+	// genomic structure
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	
+	/** alternative mixed genome structure */
+	/*
+	initializeGenomicElementType("g2", c(m0, m1), c(0.9, 0.1));
+	initializeGenomicElement(g1, 0, 20000);
+	initializeGenomicElement(g2, 20001, 30000);
+	initializeGenomicElement(g1, 30001, 99999);
+	*/
+	
+	// mutation + recombination rates
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+}
+
+///////////////////////////////////////////////////////////
+//// create subpopulations
+///////////////////////////////////////////////////////////
+
+1 early()
+{
+	// create N populations with Ne individuals each
+	for (i in 1:N)
+		sim.addSubpop(i, Ne);
+	
+	// assign local environmental optimum
+	for (pop in sim.subpopulations)
+	{
+		// pop.id starts at 1
+		// vectors are indexed from 0
+		pop.setValue("optimum", opt[pop.id - 1]);
+	}
+}
+
+///////////////////////////////////////////////////////////
+//// reproduction
+///////////////////////////////////////////////////////////
+
+reproduction()
+{
+	if (subpop.individualCount == 0)
+		return;
+	
+	// reproduction occurs within populations
+	subpop.addCrossed(individual, subpop.sampleIndividuals(1));
+}
+
+///////////////////////////////////////////////////////////
+//// optional random migration
+///////////////////////////////////////////////////////////
+
+/*
+early()
+{
+	// total individuals across all populations
+	nIndividuals = sum(sim.subpopulations.individualCount);
+	
+	// draw number of migrants
+	nMigrants = rpois(1, nIndividuals * m);
+	
+	// randomly sample migrants
+	migrants = sample(sim.subpopulations.individuals, nMigrants);
+	
+	// move migrants to new populations
+	for (migrant in migrants)
+	{
+		do
+			dest = sample(sim.subpopulations, 1);
+		while (dest == migrant.subpopulation);
+		
+		dest.takeMigrants(migrant);
+	}
+}
+*/
+
+///////////////////////////////////////////////////////////
+//// phenotype + fitness calculation
+///////////////////////////////////////////////////////////
+
+early()
+{
+	///////////////////////////////////////////////////////
+	// environmental change
+	///////////////////////////////////////////////////////
+	
+	if (sim.cycle == Tdelta)
+	{
+		for (pop in sim.subpopulations)
+		{
+			pop.setValue("optimum",
+				opt_delta[pop.id - 1]);
+		}
+	}
+	
+	///////////////////////////////////////////////////////
+	// fitness calculation
+	///////////////////////////////////////////////////////
+	
+	for (pop in sim.subpopulations)
+	{
+		// skip extinct populations
+		if (pop.individualCount == 0)
+			return;
+		
+		// current local optimum
+		optimum = pop.getValue("optimum");
+		
+		// individuals in this population
+		inds = pop.individuals;
+		
+		// phenotype = additive sum of QTL effects
+		phenotypes = inds.sumOfMutationsOfType(m1);
+		
+		// deviation from optimum
+		deviations = optimum - phenotypes;
+		
+		// normalize Gaussian fitness function
+		fitnessFunctionMax = dnorm(0.0, 0.0, 5.0);
+		
+		// degree of adaptation
+		adaptation =
+			dnorm(deviations, 0.0, 5.0) /
+			fitnessFunctionMax;
+		
+		// convert adaptation into fitness
+		//
+		// perfectly adapted:
+		// fitnessScaling = 1.0
+		//
+		// maladapted:
+		// fitnessScaling approaches 0.1
+		inds.fitnessScaling =
+			0.1 + adaptation * 0.9;
+		
+		// store phenotype values for output
+		inds.tagF = phenotypes;
+		
+		///////////////////////////////////////////////////
+		// density dependence
+		///////////////////////////////////////////////////
+		
+		// low-density populations receive a boost
+		// capped to avoid explosive growth
+		pop.fitnessScaling =
+			min(Ne / pop.individualCount, 1.5);
+	}
+}
+
+///////////////////////////////////////////////////////////
+//// mutation effects
+///////////////////////////////////////////////////////////
+
+// QTL mutations are selectively neutral directly
+// fitness effects arise through phenotype
+mutationEffect(m1)
+{
+	return 1.0;
+}
+
+
+/// output + extinction checks
+late()
+{
+	for (pop in sim.subpopulations)
+	{
+		// local extinction
+		if (pop.individualCount == 0)
+		{
+			catn(sim.cycle +
+				" | Pop " + pop.id +
+				" | EXTINCT");
+		}
+		
+		// output population summary
+		else
+		{phenotypes = pop.individuals.tagF;
+			cat(sim.cycle +
+				" | Pop " + pop.id +
+				" | N = " + pop.individualCount);
+			cat(" | phenotype mean = " + mean(phenotypes));
+			if (size(phenotypes) > 1)
+				cat(" (sd = " + sd(phenotypes) + ")");
+			catn();
+		}
+	}
+	
+	// global extinction
+	extinctPops = sum(sim.subpopulations.individualCount == 0);
+	catn("Extinct populations: " + extinctPops);
+	if (sum(sim.subpopulations.individualCount) == 0)
+	{
+		catn("GLOBAL EXTINCTION at cycle " + sim.cycle);
+		sim.simulationFinished();
+	}
+}
+
+20000 late()
+{
+	sim.simulationFinished();
+}
