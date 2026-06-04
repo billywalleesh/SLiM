@@ -1,0 +1,175 @@
+initialize()
+{
+    // use nonWF model
+    initializeSLiMModelType("nonWF");
+
+    // demographic parameters
+    defineConstant("Ne", 250);     // effective population per subpopulation
+    defineConstant("N", 8);        // number of subpopulations
+    defineConstant("m", 0.01);     // migration rate
+
+    // initial optima for each subpopulation
+    defineConstant("opt", asFloat(1:N));
+
+    // timing of environmental change onset
+    defineConstant("Tdelta", 10000);
+
+    // climate warming parameters
+    defineConstant("baseRate", 0.025);  // °C/year
+    defineConstant("r", 0.01);          // annual growth rate
+
+    // QTL mutations
+    initializeMutationType("m1", 0.5, "n", 0.0, 1.0);
+
+    // genomic structure
+    initializeGenomicElementType("g1", m1, 1.0);
+    initializeGenomicElement(g1, 0, 99999);
+
+    // mutation + recombination rates
+    initializeMutationRate(1e-7);
+    initializeRecombinationRate(1e-8);
+}
+
+/// create subpopulations
+
+1 early()
+{
+    // create subpopulations
+    for (i in 1:N)
+        sim.addSubpop("p" + i, Ne);
+
+    // assign initial optimum to each subpopulation
+    for (i in 1:N)
+    {
+        subpop = sim.subpopulations[i - 1];
+        subpop.setValue("optimum", opt[i - 1]);
+    }
+}
+
+1 early()
+{
+    writeFile(
+        "population_log.csv",
+        "tick,pop_id,N,optimum,phenotype_mean,phenotype_sd,phenotype_min,phenotype_max,allelic_richness,phenotype_lag,adaptive_fitness,extinct",
+        append=F
+    );
+}
+
+/// reproduction
+reproduction()
+{
+    if (subpop.individualCount == 0)
+        return;
+
+    subpop.addCrossed(
+        individual,
+        subpop.sampleIndividuals(1)
+    );
+}
+
+// forward migration
+early()
+{
+    if (N > 1)
+    {
+        for (i in 0:(N-2))
+        {
+            source = sim.subpopulations[i];
+            dest   = sim.subpopulations[i+1];
+
+            nMig = asInteger(source.individualCount * m);
+
+            if (nMig > 0)
+            {
+                migrants =
+                    sample(source.individuals, nMig);
+
+                dest.takeMigrants(migrants);
+            }
+        }
+    }
+}
+
+// backward migration
+early()
+{
+    if (N > 1)
+    {
+        for (i in 1:(N-1))
+        {
+            source = sim.subpopulations[i];
+            dest   = sim.subpopulations[i-1];
+
+            nMigrants =
+                asInteger(source.individualCount * m);
+
+            if (nMigrants > 0)
+            {
+                migrants =
+                    sample(source.individuals,
+                           nMigrants);
+
+                dest.takeMigrants(migrants);
+            }
+        }
+    }
+}
+
+/// phenotype + fitness calculation
+early()
+{
+    // dynamic climate warming
+    if (sim.cycle >= Tdelta)
+    {
+        t = sim.cycle - Tdelta;
+
+        // cumulative warming:
+        // sum(baseRate * (1+r)^k)
+        cumulativeWarming =
+            baseRate *
+            (pow(1.0 + r, t + 1) - 1.0) / r;
+
+        for (i in 1:N)
+        {
+            subpop = sim.subpopulations[i - 1];
+
+            subpop.setValue(
+                "optimum",
+                opt[i - 1] + cumulativeWarming
+            );
+        }
+    }
+
+    // calculate fitness selection
+    for (pop in sim.subpopulations)
+    {
+        optimum = pop.getValue("optimum");
+
+        inds = pop.individuals;
+
+        // phenotype = additive sum of QTL effects
+        phenotypes =
+            inds.sumOfMutationsOfType(m1);
+
+        deviations =
+            optimum - phenotypes;
+
+        fitnessFunctionMax =
+            dnorm(0.0, 0.0, 5.0);
+
+        adaptation =
+            dnorm(deviations, 0.0, 5.0) /
+            fitnessFunctionMax;
+
+        inds.fitnessScaling =
+            0.1 + adaptation * 0.9;
+
+        inds.tagF = phenotypes;
+
+        pop.fitnessScaling =
+            min(Ne / pop.individualCount, 1.5);
+    }
+}
+
+/// end simulation
+20000 late(){sim.simulationFinished();}
