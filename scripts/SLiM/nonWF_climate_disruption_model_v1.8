@@ -7,15 +7,14 @@ initialize()
 	// use nonWF model
 	initializeSLiMModelType("nonWF");
 	// demographic parameters
-	defineConstant("Ne", 250);     // effective population per subpopulation
-	defineConstant("N", 8);        // number of subpopulations
+	defineConstant("Ne", 10);     // effective population per subpopulation
+	defineConstant("N", 3);        // number of subpopulations
 	defineConstant("m", 0.01);     // migration rate
-	//defineConstant("e", 0.1);      // extinction rate 
 	
-	// automatically create vector: c(1,2,3,4,5...)
+	// initial optimum vector: c(1,2,3,4,5...)
 	defineConstant("opt", asFloat(1:N));
 	
-	// optional shifted vector: c(11,12,13,14,15...)
+	//shifted optimum vector: c(11,12,13,14,15...)
 	defineConstant("opt_delta", asFloat((1:N) + 10));
 	
 	// timing of environmental shift
@@ -50,7 +49,7 @@ initialize()
 1 early()
 {
 	// create subpopulations
-	for (i in 1:N)
+	for (i in 1:N-1)
 		sim.addSubpop("p" + i, Ne);
 	
 	// assign optimum to each subpopulation
@@ -291,6 +290,8 @@ late()
 				" | N=" + pop.individualCount +
 				" | Mean phenotype=" +
 				phenotype_mean +
+				" | Max phenotype=" +
+				phenotype_max +
 				" | Mean fitness=" +
 				adaptive_fitness
 				);
