@@ -1,0 +1,125 @@
+initialize() {
+	initializeSLiMModelType("nonWF"); // set non-WF model
+	
+	initializeMutationRate(1e-7); // set standard mutation rate
+	initializeRecombinationRate(1e-8); // set standard recombination rate
+	initializeMutationType("m1", 0.5, "f", 0.0); // set neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // set mutations that will have an effect (defined here as neutral, but we'll add a phenotypic effect below). 
+	m2.color = "red"; // will be displayed in red in the output
+	initializeGenomicElementType("g1", c(m1,m2), c(0.99,0.01)); // set relative frequency: m2 is 1% of all mutations
+	initializeGenomicElement(g1, 0, 99999); // set genome size
+}
+
+// Set reproduction behavior: every individual gets a number of offspring from a poisson distriubtion of mean R. 
+reproduction() {
+	R = 1.01; // on average every individual 1.01 offspring
+	
+	// individuals reproduce locally, without dispersal
+	litterSize = rpois(1, R);
+	
+	for (i in seqLen(litterSize))
+	{
+		// generate each offspring with an independently drawn mate
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+// set size of sub pop at start: e.g. 200 in each 
+1 early() {
+	sim.addSubpop("p1", 200);
+	sim.addSubpop("p2", 200);
+}
+
+
+// Set ageing, migration and survival 
+early() {
+	K=5000; // maxmimal capacity per sub-pop (5000 individuals)
+	
+	inds = sim.subpopulations.individuals; // get all the individuals
+	
+	
+	// AGE MORTALITY
+	// non-overlapping generations; kill off the parental generation
+	ages = inds.age; // get age of all individuals
+	inds[ages > 0].fitnessScaling = 0.0; // if old individuals -> kill them
+	inds = inds[ages == 0]; // keep only juveniles
+	
+	
+	// MIGRATION
+	// pre-plan migration of individuals to adjacent subpops
+	M=0.005; // migration probability
+	
+	numMigrants = rbinom(1, inds.size(), M); // across all individuals, how many migrants? -> sample from a binomial distribution of mean M -> on average, ~0.005 individuals migrate across all pops
+	
+	if (numMigrants) // if at least one migrant...
+	{
+		migrants = sample(inds, numMigrants); // pick up the id of the migrants
+		currentSubpopID = migrants.subpopulation.id; // pick up subpop of migrants
+		
+				
+		newSubpopID = currentSubpopID; // initialize destination vector
+		
+		// individuals go from p1 to p2, from p2 to p3 and from p3 to p1
+		newSubpopID[currentSubpopID==1] = 2;
+		newSubpopID[currentSubpopID==2] = 1;
+
+				
+		// do the pre-planned moves into each subpop in bulk
+		for (subpop in sim.subpopulations) // for every sub-pop --> move migrants to their destination
+				subpop.takeMigrants(migrants[newSubpopID == subpop.id]);
+	
+	}
+	
+	// post-migration density-dependent fitness for each subpop
+	for (subpop in sim.subpopulations)
+	{
+		juvenileCount = sum(subpop.individuals.age == 0); // after the migration: count how many juveniles are there
+		subpop.fitnessScaling = K / juvenileCount; // set fitness of juveniles based on the maximal capacity of the sub-population (K)
+	}
+}
+
+///// FIRST PHASE: nothing happens
+// In the first 2000 generations: nothing happens --> all mutations build up as neutral, there is no selection in any population 
+
+
+
+///// SECOND PHASE: local adaptation 
+// Between generation 2000 and 4000: the climate in the two populations change. In Pop1: CLIMATE = 2 // In Pop2: CLIMATE=6. 
+2000:4000 fitnessEffect() {
+	climate = (subpop == p1 ? 2 else 6); // here set the climate specific to the pop
+
+	phenotype = asFloat(individual.countOfMutationsOfType(m2)); // the phenotype (optimal climate) of an individual is the sum of the m2 mutations in their genome. For ex. an individual is adapted to climate = 2 if they have 2 m2 mutations. 
+
+	fitness = 1 - ((phenotype-climate)^2)*0.05; // fitness defined by a quadratic function. If phenotype = climate -> fitness is 1, otherwise it declines. The shaping parameter (here 0.05) determines how much fitness declines as phenotypes diverges from the climate
+	fitness[fitness<0] = 0; // if fitness is negative --> set to 0
+	return fitness;
+}
+
+///// THIRD PHASE: local adaptation changes 
+// After generation 4000, the climate in Pop1 increases to 6, becoming identical to the one in pop2. 
+4000:6000 fitnessEffect() {
+	climate = (subpop == p1 ? 6 else 6); // all climates are 6
+
+	phenotype = asFloat(individual.countOfMutationsOfType(m2)); // as above (phenotype depends on sum of m2 mutations)
+
+	fitness = 1 - ((phenotype-climate)^2)*0.05; // as above 
+	fitness[fitness<0] = 0; // as above
+	return fitness;
+}
+
+
+// Expected behavior: check popualtion sizes and fitness over time. 
+// For the first 2000 gen: pop size gets rapidly to maximum capacity (5000 per sub-pop, 10000 in total). Fitness is 1 in all individuals (no selection)
+// At 2000: selection kicks in, and is much stronger in pop 2! Decline in individuals and in fitness in both populations, then a recovery. 
+// At 4000: selection hits again in Pop1, rapid decline and recovery of N and fitness, because migration from Pop2 (already adapted) supports this recovery. 
+
+
+
+
+
+
+
+
+

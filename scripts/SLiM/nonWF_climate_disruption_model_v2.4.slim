@@ -1,0 +1,83 @@
+initialize() {
+	initializeSLiMModelType("nonWF");
+
+	defineConstant("initialClimate", c(2.0, 3.0, 4.0, 5.0, 6.0));
+	defineConstant("shiftedClimate", c(5.0, 5.0, 4.0, 4.0, 7.0));
+
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // mutations affecting phenotype
+	m2.color = "red";
+	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
+	initializeGenomicElement(g1, 0, 99999);
+}
+
+// Each individual produces a Poisson-distributed number of offspring.
+reproduction() {
+	litterSize = rpois(1, 1.01);
+
+	for (i in seqLen(litterSize))
+	{
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+// Create five populations along a climatic gradient.
+1 early() {
+	for (i in 1:5)
+		sim.addSubpop("p" + i, 200);
+}
+
+// Set mortality, migration, and density regulation.
+early() {
+	K = 5000;
+	inds = sim.subpopulations.individuals;
+
+	// Kill the parental generation.
+	inds[inds.age > 0].fitnessScaling = 0.0;
+	inds = inds[inds.age == 0];
+
+	// Move juveniles between neighbouring populations.
+	numMigrants = rbinom(1, inds.size(), 0.005);
+	if (numMigrants)
+	{
+		migrants = sample(inds, numMigrants);
+		current = migrants.subpopulation.id;
+		destination = current + sample(c(-1, 1), numMigrants, replace=T);
+		destination[current == 1] = 2;
+		destination[current == 5] = 4;
+
+		for (subpop in sim.subpopulations)
+			subpop.takeMigrants(migrants[destination == subpop.id]);
+	}
+
+	// Regulate each population after migration.
+	for (subpop in sim.subpopulations)
+	{
+		juvenileCount = sum(subpop.individuals.age == 0);
+		if (juvenileCount)
+			subpop.fitnessScaling = K / juvenileCount;
+	}
+}
+
+///// FIRST PHASE: neutral burn-in
+// Until generation 2000, mutations accumulate without selection.
+
+///// SECOND PHASE: local adaptation
+// From generation 2000, populations adapt along a climatic gradient.
+
+///// THIRD PHASE: climate disruption
+// At generation 4000, climates increase, decrease, or remain stable.
+2000:6000 fitnessEffect() {
+	climates = (sim.cycle < 4000 ? initialClimate else shiftedClimate);
+	climate = climates[subpop.id - 1];
+	phenotype = asFloat(individual.countOfMutationsOfType(m2));
+
+	fitness = 1.0 - (phenotype - climate)^2 * 0.05;
+	return max(0.0, fitness);
+}
+
+6000 late() { sim.simulationFinished(); }

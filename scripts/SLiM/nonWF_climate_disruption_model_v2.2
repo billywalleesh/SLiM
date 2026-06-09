@@ -1,0 +1,154 @@
+/// evolutionary rescue model with multiple subpopulations
+/// nonWF QTL adaptation model with environmental change
+
+
+initialize()
+{
+	// use nonWF model
+	initializeSLiMModelType("nonWF");
+	// demographic parameters
+	defineConstant("Ne", 250);     // effective population per subpopulation
+	defineConstant("N", 1);        // number of subpopulations
+	
+	// automatically create vector: c(1,2,3,4,5...)
+	defineConstant("opt", asFloat(1:N));
+	
+	// optional shifted vector: c(11,12,13,14,15...)
+	defineConstant("opt_delta", asFloat((1:N) + 10));
+	
+	// timing of environmental shift
+	defineConstant("Tdelta", 10000);
+	// phenotype-to-fitness parameters
+	defineConstant("fitness_width", 5.0); // larger values make selection more forgiving
+	defineConstant("min_fitness", 0.1);   // lowest individual fitness scaling	
+	
+	// QTL mutations
+	// effects drawn from N(0,1)
+	initializeMutationType("m1", 0.5, "n", 0.0, 1.0);
+	
+	// genomic structure
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	
+	// mutation + recombination rates
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+}
+
+/// create subpopulations
+
+1 early()
+{
+	// create subpopulations
+	for (i in 1:N)
+		sim.addSubpop("p" + i, Ne);
+	
+	// assign optimum to each subpopulation
+	for (i in 1:N)
+	{
+		subpop = sim.subpopulations[i - 1];
+		
+		subpop.setValue("optimum", opt[i - 1]);
+	}
+}
+
+/// reproduction
+reproduction()
+{
+	if (subpop.individualCount == 0)
+		return;
+	//keeping reproduction within pops seperate 
+	subpop.addCrossed(individual, subpop.sampleIndividuals(1));
+}
+
+/// phenotype + fitness calculation
+early()
+{
+	
+	// afterburn in apply the climate-disruption shift
+	if (sim.cycle == Tdelta)
+	{
+		for (i in 1:N)
+		{
+			pop = sim.subpopulations[i - 1];
+			pop.setValue("optimum", opt_delta[i - 1]);
+			pop.setValue("phase", "climate_shift");
+		}
+	}
+	
+	for (pop in sim.subpopulations)
+	{
+		if (pop.individualCount == 0)
+			return;
+		
+		optimum = pop.getValue("optimum");
+		inds = pop.individuals;
+		
+		// phenotype = additive sum of QTL effects
+		phenotypes = inds.sumOfMutationsOfType(m1);
+		
+		// distance from the local environmental optimum
+		distance_from_optimum = phenotypes - optimum;
+		scaled_distance = distance_from_optimum / fitness_width;
+		
+		// phenotype match is 1 at the optimum and approaches 0 farther away
+		phenotype_match =
+			exp(-0.5 * scaled_distance^2);
+		
+		// convert phenotype match into individual fitness scaling
+		inds.fitnessScaling =
+			min_fitness + phenotype_match * (1.0 - min_fitness);
+		
+		// store phenotype values for output
+		inds.tagF = phenotypes;
+		
+		// density-dependent population regulation
+		pop.fitnessScaling =
+			min(Ne / pop.individualCount, 1.5);
+	}
+}
+
+/// mutation effects
+
+// QTL mutations are directly neutral
+// fitness effects occur indirectly through phenotype
+mutationEffect(m1) {return 1.0;}
+
+/// output + extinction checks
+late()
+{
+	for (pop in sim.subpopulations)
+	{
+		// local extinction
+		if (pop.individualCount == 0)
+		{
+			catn(sim.cycle +
+				" | Pop " + pop.id +
+				" | EXTINCT");
+		}
+		
+		// output population summary
+		else
+		{phenotypes = pop.individuals.tagF;
+			cat(sim.cycle +
+				" | Pop " + pop.id +
+				" | N = " + pop.individualCount);
+			cat(" | phenotype mean = " + mean(phenotypes));
+			if (size(phenotypes) > 1)
+				cat(" (sd = " + sd(phenotypes) + ")");
+			catn();
+		}
+	}
+	
+	// global extinction
+	extinctPops = sum(sim.subpopulations.individualCount == 0);
+	catn("Extinct populations: " + extinctPops);
+	if (sum(sim.subpopulations.individualCount) == 0)
+	{
+		catn("GLOBAL EXTINCTION at cycle " + sim.cycle);
+		sim.simulationFinished();
+	}
+}
+
+/// end simulation
+20000 late(){sim.simulationFinished();}

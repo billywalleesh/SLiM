@@ -1,0 +1,367 @@
+/// evolutionary rescue model with multiple subpopulations
+/// nonWF QTL adaptation model with explicit burn-in phases
+/// v2.1: parameter-sweep friendly output for SLURM/R analysis
+
+initialize()
+{
+	// use nonWF model
+	initializeSLiMModelType("nonWF");
+	
+	// parameters can be overridden from the command line with -d
+	if (!exists("RUN_ID")) defineConstant("RUN_ID", "slimgui_run");
+	if (!exists("SEED")) defineConstant("SEED", 1);
+	if (!exists("OUTFILE")) defineConstant("OUTFILE", "population_log.csv");
+	
+	if (!exists("Ne")) defineConstant("Ne", 10);     // target population size per subpopulation
+	if (!exists("N")) defineConstant("N", 3);        // number of subpopulations
+	if (!exists("m")) defineConstant("m", 0.01);     // migration rate between neighboring populations
+	
+	if (!exists("MU")) defineConstant("MU", 1e-7);
+	if (!exists("R")) defineConstant("R", 1e-8);
+	
+	if (!exists("Tburn_shared")) defineConstant("Tburn_shared", 5000);
+	if (!exists("Tburn_gradient")) defineConstant("Tburn_gradient", 10000);
+	if (!exists("Tpost_shift")) defineConstant("Tpost_shift", 5000);
+	if (!exists("LOG_INTERVAL")) defineConstant("LOG_INTERVAL", 10);
+	
+	defineConstant("Tdelta", Tburn_shared + Tburn_gradient);
+	defineConstant("Tend", Tdelta + Tpost_shift);
+	
+	// environmental optima
+	if (!exists("burnin_optimum")) defineConstant("burnin_optimum", 0.0);
+	if (!exists("opt_step")) defineConstant("opt_step", 1.0);
+	if (!exists("shift_size")) defineConstant("shift_size", 10.0);
+	
+	defineConstant("opt", asFloat((1:N) * opt_step));
+	defineConstant("opt_delta", opt + shift_size);
+	
+	// phenotype-to-fitness parameters
+	if (!exists("fitness_width")) defineConstant("fitness_width", 5.0);
+	if (!exists("min_fitness")) defineConstant("min_fitness", 0.1);
+	
+	// QTL mutations
+	// effects drawn from N(0,1)
+	initializeMutationType("m1", 0.5, "n", 0.0, 1.0);
+	
+	// genomic structure
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	
+	// mutation + recombination rates
+	initializeMutationRate(MU);
+	initializeRecombinationRate(R);
+}
+
+/// create subpopulations
+1 early()
+{
+	for (i in 1:N)
+		sim.addSubpop("p" + i, Ne);
+	
+	// start all populations in the same ancestral environment
+	for (pop in sim.subpopulations)
+	{
+		pop.setValue("optimum", burnin_optimum);
+		pop.setValue("phase", "shared_burnin");
+	}
+}
+
+/// create output file
+1 early()
+{
+	writeFile(
+		OUTFILE,
+		"run_id,seed,tick,phase,pop_id,pop_size,target_Ne,num_pops,migration_rate,opt_step,shift_size,fitness_width,min_fitness,Tburn_shared,Tburn_gradient,Tdelta,Tend,optimum,phenotype_mean,phenotype_sd,phenotype_min,phenotype_max,allelic_richness,phenotype_lag,mean_phenotype_match,extinct",
+		append=F
+		);
+}
+
+/// reproduction
+reproduction()
+{
+	if (subpop.individualCount == 0)
+		return;
+	
+	// reproduction stays within each subpopulation
+	subpop.addCrossed(individual, subpop.sampleIndividuals(1));
+}
+
+/// forward migration along the population chain
+early()
+{
+	if (N > 1)
+	{
+		for (i in 0:(N - 2))
+		{
+			source = sim.subpopulations[i];
+			dest = sim.subpopulations[i + 1];
+			
+			nMigrants = asInteger(source.individualCount * m);
+			
+			if (nMigrants > 0)
+			{
+				migrants = sample(source.individuals, nMigrants);
+				dest.takeMigrants(migrants);
+			}
+		}
+	}
+}
+
+/// backward migration along the population chain
+early()
+{
+	if (N > 1)
+	{
+		for (i in 1:(N - 1))
+		{
+			source = sim.subpopulations[i];
+			dest = sim.subpopulations[i - 1];
+			
+			nMigrants = asInteger(source.individualCount * m);
+			
+			if (nMigrants > 0)
+			{
+				migrants = sample(source.individuals, nMigrants);
+				dest.takeMigrants(migrants);
+			}
+		}
+	}
+}
+
+/// phenotype + fitness calculation
+early()
+{
+	// after shared burn-in, place populations on the initial environmental gradient
+	if (sim.cycle == Tburn_shared)
+	{
+		for (i in 1:N)
+		{
+			pop = sim.subpopulations[i - 1];
+			pop.setValue("optimum", opt[i - 1]);
+			pop.setValue("phase", "gradient_burnin");
+		}
+	}
+	
+	// after gradient burn-in, apply the climate-disruption shift
+	if (sim.cycle == Tdelta)
+	{
+		for (i in 1:N)
+		{
+			pop = sim.subpopulations[i - 1];
+			pop.setValue("optimum", opt_delta[i - 1]);
+			pop.setValue("phase", "climate_shift");
+		}
+	}
+	
+	for (pop in sim.subpopulations)
+	{
+		if (pop.individualCount > 0)
+		{
+			optimum = pop.getValue("optimum");
+			inds = pop.individuals;
+			
+			// phenotype = additive sum of QTL effects
+			phenotypes = inds.sumOfMutationsOfType(m1);
+			
+			// distance from the local environmental optimum
+			distance_from_optimum = phenotypes - optimum;
+			scaled_distance = distance_from_optimum / fitness_width;
+			
+			// phenotype match is 1 at the optimum and approaches 0 farther away
+			phenotype_match =
+				exp(-0.5 * scaled_distance * scaled_distance);
+			
+			// convert phenotype match into individual fitness scaling
+			inds.fitnessScaling =
+				min_fitness + phenotype_match * (1.0 - min_fitness);
+			
+			// store phenotype values for output
+			inds.tagF = phenotypes;
+			
+			// density-dependent population regulation
+			pop.fitnessScaling =
+				min(Ne / pop.individualCount, 1.5);
+		}
+	}
+}
+
+/// mutation effects
+
+// QTL mutations are directly neutral
+// fitness effects occur indirectly through phenotype
+mutationEffect(m1) { return 1.0; }
+
+/// output + extinction checks
+late()
+{
+	// keep batch output manageable, while always logging key phase boundaries
+	if ((sim.cycle % LOG_INTERVAL != 0) &
+		(sim.cycle != 1) &
+		(sim.cycle != Tburn_shared) &
+		(sim.cycle != Tdelta) &
+		(sim.cycle != Tend))
+		return;
+	
+	for (pop in sim.subpopulations)
+	{
+		phase = pop.getValue("phase");
+		optimum = pop.getValue("optimum");
+		
+		// extinct population
+		if (pop.individualCount == 0)
+		{
+			line =
+				RUN_ID + "," +
+				SEED + "," +
+				sim.cycle + "," +
+				phase + "," +
+				pop.id + "," +
+				"0," +
+				Ne + "," +
+				N + "," +
+				m + "," +
+				opt_step + "," +
+				shift_size + "," +
+				fitness_width + "," +
+				min_fitness + "," +
+				Tburn_shared + "," +
+				Tburn_gradient + "," +
+				Tdelta + "," +
+				Tend + "," +
+				optimum + "," +
+				"NA,NA,NA,NA," +
+				"0," +
+				"NA," +
+				"0," +
+				"1";
+			
+			writeFile(
+				OUTFILE,
+				line,
+				append=T
+				);
+			
+			catn(
+				sim.cycle +
+				" | " + RUN_ID +
+				" | " + phase +
+				" | Pop " + pop.id +
+				" | EXTINCT"
+				);
+		}
+		
+		// extant population
+		else
+		{
+			phenotypes = pop.individuals.tagF;
+			
+			phenotype_mean = mean(phenotypes);
+			
+			phenotype_sd =
+				(size(phenotypes) > 1) ?
+				sd(phenotypes) else 0.0;
+			
+			phenotype_min = min(phenotypes);
+			phenotype_max = max(phenotypes);
+			
+			phenotype_lag =
+				optimum - phenotype_mean;
+			
+			muts =
+				unique(pop.haplosomes.mutationsOfType(m1));
+			
+			if (size(muts) > 0)
+			{
+				freqs =
+					sim.mutationFrequencies(pop, muts);
+				
+				allelic_richness =
+					sum(freqs > 0.0 & freqs < 1.0);
+			}
+			else
+			{
+				allelic_richness = 0;
+			}
+			
+			distance_from_optimum =
+				phenotypes - optimum;
+			
+			scaled_distance =
+				distance_from_optimum / fitness_width;
+			
+			phenotype_match =
+				exp(-0.5 * scaled_distance * scaled_distance);
+			
+			mean_phenotype_match =
+				mean(phenotype_match);
+			
+			line =
+				RUN_ID + "," +
+				SEED + "," +
+				sim.cycle + "," +
+				phase + "," +
+				pop.id + "," +
+				pop.individualCount + "," +
+				Ne + "," +
+				N + "," +
+				m + "," +
+				opt_step + "," +
+				shift_size + "," +
+				fitness_width + "," +
+				min_fitness + "," +
+				Tburn_shared + "," +
+				Tburn_gradient + "," +
+				Tdelta + "," +
+				Tend + "," +
+				optimum + "," +
+				phenotype_mean + "," +
+				phenotype_sd + "," +
+				phenotype_min + "," +
+				phenotype_max + "," +
+				allelic_richness + "," +
+				phenotype_lag + "," +
+				mean_phenotype_match + "," +
+				"0";
+			
+			writeFile(
+				OUTFILE,
+				line,
+				append=T
+				);
+			
+			catn(
+				sim.cycle +
+				" | " + RUN_ID +
+				" | " + phase +
+				" | Pop " + pop.id +
+				" | N=" + pop.individualCount +
+				" | Mean phenotype=" +
+				phenotype_mean +
+				" | Mean match=" +
+				mean_phenotype_match
+				);
+		}
+	}
+	
+	// SLiMgui extinction check
+	extinctPops =
+		sum(sim.subpopulations.individualCount == 0);
+	
+	catn(
+		"Extinct populations: " +
+		extinctPops
+		);
+	
+	if (sum(sim.subpopulations.individualCount) == 0)
+	{
+		catn(
+			"GLOBAL EXTINCTION at cycle " +
+			sim.cycle
+			);
+		
+		sim.simulationFinished();
+	}
+}
+
+/// end simulation
+Tend late() { sim.simulationFinished(); }

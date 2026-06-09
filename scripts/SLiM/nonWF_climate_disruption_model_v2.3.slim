@@ -1,0 +1,73 @@
+initialize() {
+	initializeSLiMModelType("nonWF");
+
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // mutations affecting phenotype
+	m2.color = "red";
+	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
+	initializeGenomicElement(g1, 0, 99999);
+}
+
+// Each individual produces a Poisson-distributed number of offspring.
+reproduction() {
+	litterSize = rpois(1, 1.01);
+
+	for (i in seqLen(litterSize))
+	{
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+// Create two connected populations.
+1 early() {
+	sim.addSubpop("p1", 200);
+	sim.addSubpop("p2", 200);
+}
+
+// Set mortality, migration, and density regulation.
+early() {
+	K = 5000;
+	inds = sim.subpopulations.individuals;
+
+	// Kill the parental generation.
+	inds[inds.age > 0].fitnessScaling = 0.0;
+	inds = inds[inds.age == 0];
+
+	// Exchange juveniles between populations.
+	numMigrants = rbinom(1, inds.size(), 0.005);
+	if (numMigrants)
+	{
+		migrants = sample(inds, numMigrants);
+		destination = 3 - migrants.subpopulation.id;
+
+		for (subpop in sim.subpopulations)
+			subpop.takeMigrants(migrants[destination == subpop.id]);
+	}
+
+	// Regulate each population after migration.
+	for (subpop in sim.subpopulations)
+	{
+		juvenileCount = sum(subpop.individuals.age == 0);
+		subpop.fitnessScaling = K / juvenileCount;
+	}
+}
+
+///// FIRST PHASE: neutral burn-in
+// Until generation 2000, mutations accumulate without selection.
+
+///// SECOND PHASE: local adaptation
+// From generation 2000, populations adapt to climates 2 and 6.
+// At generation 4000, population 1 shifts to climate 6.
+2000:6000 fitnessEffect() {
+	climate = (subpop == p2 | sim.cycle >= 4000 ? 6.0 else 2.0);
+	phenotype = asFloat(individual.countOfMutationsOfType(m2));
+
+	fitness = 1.0 - (phenotype - climate)^2 * 0.05;
+	return max(0.0, fitness);
+}
+
+6000 late() { sim.simulationFinished(); }
