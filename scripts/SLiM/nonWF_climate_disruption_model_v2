@@ -7,8 +7,8 @@ initialize()
 	initializeSLiMModelType("nonWF");
 	
 	// demographic parameters
-	defineConstant("Ne", 10);        // target population size per subpopulation
-	defineConstant("N", 3);          // number of subpopulations
+	defineConstant("Ne", 250);        // target population size per subpopulation
+	defineConstant("N", 2);          // number of subpopulations
 	defineConstant("m", 0.01);       // migration rate between neighboring populations
 	
 	// burn-in and climate-change timing
@@ -143,7 +143,7 @@ early()
 	for (pop in sim.subpopulations)
 	{
 		if (pop.individualCount == 0)
-			continue;
+			return;
 		
 		optimum = pop.getValue("optimum");
 		inds = pop.individuals;
