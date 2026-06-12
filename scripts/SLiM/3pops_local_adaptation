@@ -28,6 +28,7 @@ reproduction() {
 
 // set size of sub pop at start: e.g. 200 in each 
 1 early() {
+	sim.addSubpop("p0", 200);
 	sim.addSubpop("p1", 200);
 	sim.addSubpop("p2", 200);
 }
@@ -46,30 +47,34 @@ early() {
 	inds[ages > 0].fitnessScaling = 0.0; // if old individuals -> kill them
 	inds = inds[ages == 0]; // keep only juveniles
 	
-	
-	// MIGRATION
-	// pre-plan migration of individuals to adjacent subpops
-	M=0.005; // migration probability
-	
-	numMigrants = rbinom(1, inds.size(), M); // across all individuals, how many migrants? -> sample from a binomial distribution of mean M -> on average, ~0.005 individuals migrate across all pops
-	
-	if (numMigrants) // if at least one migrant...
-	{
-		migrants = sample(inds, numMigrants); // pick up the id of the migrants
-		currentSubpopID = migrants.subpopulation.id; // pick up subpop of migrants
+	//set migration matrix p0 = [0] p1 = [1] p2 = [2]
+	M = matrix(c(0.000, 0.005, 0.001,
+		0.005, 0.000, 0.005,
+		0.001, 0.005, 0.000),
+		nrow=3, ncol=3, byrow=T);
 		
-				
-		newSubpopID = currentSubpopID; // initialize destination vector
-		
-		// individuals go from p1 to p2, from p2 to p3 and from p3 to p1
-		newSubpopID[currentSubpopID==1] = 2;
-		newSubpopID[currentSubpopID==2] = 1;
-
-				
-		// do the pre-planned moves into each subpop in bulk
-		for (subpop in sim.subpopulations) // for every sub-pop --> move migrants to their destination
-				subpop.takeMigrants(migrants[newSubpopID == subpop.id]);
+	// P0 sends migrants, how many individuals is p0 sending to p1 and p2
+	for (dest in c(p1, p2)) {
+		rate = M[0, dest.id]; //Mig_rate for p1 = [0, 1] or (0.005), rate for p2 = [0, 2] or (0.001)
+		numMigrants = rbinom(1, p0.individuals.size(), rate); //find number of migrants
+		if (numMigrants > 0)
+			dest.takeMigrants(sample(p0.individuals, numMigrants)); //randomly pick inds to migrate and moves them to dest
+	}
 	
+	// P1 sends migrants
+	for (dest in c(p0, p2)) {
+		rate = M[1, dest.id];
+		numMigrants = rbinom(1, p1.individuals.size(), rate);
+		if (numMigrants > 0)
+			dest.takeMigrants(sample(p1.individuals, numMigrants));
+	}
+	
+	// P2 sends migrants
+	for (dest in c(p0, p1)) {
+		rate = M[2, dest.id];
+		numMigrants = rbinom(1, p2.individuals.size(), rate);
+		if (numMigrants > 0)
+			dest.takeMigrants(sample(p2.individuals, numMigrants));
 	}
 	
 	// post-migration density-dependent fitness for each subpop
@@ -88,10 +93,10 @@ early() {
 ///// SECOND PHASE: local adaptation 
 // Between generation 2000 and 4000: the climate in the two populations change. In Pop1: CLIMATE = 2 // In Pop2: CLIMATE=6. 
 1999:3999 fitnessEffect() {
-	climate = (subpop == p1 ? 2 else 6); // here set the climate specific to the pop
-
+	climate = (subpop == p0 ? 2 else 6); // here set the climate specific to the pop
+	
 	phenotype = asFloat(individual.countOfMutationsOfType(m2)); // the phenotype (optimal climate) of an individual is the sum of the m2 mutations in their genome. For ex. an individual is adapted to climate = 2 if they have 2 m2 mutations. 
-
+	
 	fitness = 1 - ((phenotype-climate)^2)*0.05; // fitness defined by a quadratic function. If phenotype = climate -> fitness is 1, otherwise it declines. The shaping parameter (here 0.05) determines how much fitness declines as phenotypes diverges from the climate
 	fitness[fitness<0] = 0; // if fitness is negative --> set to 0
 	return fitness;
@@ -100,10 +105,10 @@ early() {
 ///// THIRD PHASE: local adaptation changes 
 // After generation 4000, the climate in Pop1 increases to 6, becoming identical to the one in pop2. 
 4000:6000 fitnessEffect() {
-	climate = (subpop == p1 ? 6 else 6); // all climates are 6
-
+	climate = (subpop == p0 ? 6 else 6); // all climates are 6
+	
 	phenotype = asFloat(individual.countOfMutationsOfType(m2)); // as above (phenotype depends on sum of m2 mutations)
-
+	
 	fitness = 1 - ((phenotype-climate)^2)*0.05; // as above 
 	fitness[fitness<0] = 0; // as above
 	return fitness;
