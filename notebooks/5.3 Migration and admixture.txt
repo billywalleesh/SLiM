@@ -1,0 +1,390 @@
+5.3 Migration and admixture
+The previous subsections already showed how to set up patterns of migration among multiple
+subpopulations. Here, we will focus on recipes for a few standard types of population structure to
+show how the flexibility of Eidos makes setting up complex population structure easy.
+5.3.1 A linear stepping-stone model
+This model describes a linear chain of subpopulations, each of which is connected by migration
+only to its nearest neighbors. This is quite easy to set up:
+134
+initialize() {
+defineConstant("COUNT", 10);
+initializeMutationRate(1e-7);
+initializeMutationType("m1", 0.5, "f", 0.0);
+initializeGenomicElementType("g1", m1, 1.0);
+initializeGenomicElement(g1, 0, 99999);
+initializeRecombinationRate(1e-8);
+}
+1 early() {
+for (i in 0:(COUNT-1))
+sim.addSubpop(i, 500);
+subpops = sim.subpopulations;
+for (i in 1:(COUNT-1)) subpops[i].setMigrationRates(i-1, 0.2);
+for (i in 0:(COUNT-2)) subpops[i].setMigrationRates(i+1, 0.05);
+}
+10000 late() { sim.outputFixedMutations(); }
+If you open this recipe in SLiMgui, Recycle, do Step twice to step through tick 1, and open the
+population visualization graph, you will see the resulting structure:
+As you can see, migration is stronger in one direction than in the other; this might represent
+gene flow in a river system, for example, where gene flow is more likely to go downstream than
+upstream. Indeed, it would be trivial to interrupt the upstream gene flow completely in certain
+spots to represent the effect of waterfalls that prevent upstream migration. Using the techniques
+shown in previous sections, it would also be trivial to make the migration pattern change over
+time; a major flooding event in one generation could allow gene flow to pass upstream past a
+small waterfall, for example.
+This population structure is achieved using three for loops. We saw for loops briefly in section
+4.1.5; let’s revisit the concept now. The first loop in this recipe is:
+for (i in 0:(COUNT-1))
+sim.addSubpop(i, 500);
+This causes the statement sim.addSubpop(i, 500); to be executed repeatedly as the loop index
+variable i varies from 0 up to 9, following the sequence defined by 0:(COUNT-1). (Note that COUNT
+was defined as a constant with the value 10 in the initialize() callback.) The result is that new
+subpopulations are created in order: p0, p1, p2, and on up to p9.
+The second loop is almost as straightforward:
+for (i in 1:(COUNT-1)) subpops[i].setMigrationRates(i-1, 0.2);
+This sets up migration into each subpopulation from the previous one: into p1 from p0, into p2
+from p1, and so forth. Since p0 receives no migration in this direction (being the start of the chain),
+p0
+p1
+p2
+p3
+p4
+p5
+p6
+p7
+p8
+p9
+135
+the loop starts at 1, not 0. For each value of i, the corresponding subpopulation is looked up in
+subpops, a copy of sim.subpopulations, a vector of the simulation’s subpopulations. Given
+subpopulation i, the setMigrationRates() call then sets up migration from subpopulation i-1.
+(Notice how numbering the subpopulations starting at 0 made the logic simpler; subpopulation p0
+is at index 0 in subpops, p1 is at index 1 in subpops, etc. – contrast that with the following section.)
+Given that explanation, the operation of the third loop should be fairly obvious. The power of
+this algorithmic approach to setting up population structure should be clear; if we want 1000
+subpopulations arranged in this manner, all we have to do is change the definition of COUNT to
+1000. The population visualization graph in SLiMgui would find that a bit challenging to display,
+but it should be possible to test and debug such a model with just 10 subpopulations, and then
+scale up to 1000 subpopulations for your production runs.
+5.3.2 A non-spatial metapopulation
+Another possible scenario is a non-spatial metapopulation in which migration between each
+pair of subpopulations occurs at some constant rate. This can be set up as follows:
+initialize() {
+initializeMutationRate(1e-7);
+initializeMutationType("m1", 0.5, "f", 0.0);
+initializeGenomicElementType("g1", m1, 1.0);
+initializeGenomicElement(g1, 0, 99999);
+initializeRecombinationRate(1e-8);
+}
+1 early() {
+subpopCount = 5;
+for (i in 1:subpopCount)
+sim.addSubpop(i, 500);
+for (i in 1:subpopCount)
+for (j in 1:subpopCount)
+if (i != j)
+sim.subpopulations[i-1].setMigrationRates(j, 0.05);
+}
+10000 late() { sim.outputFixedMutations(); }
+Here a nested pair of for loops using index variables i and j sets up the migration from j into i
+for each pair of subpopulations. The test if (i!=j) prevents the code from attempting to set the
+migration rate from a subpopulation into itself, which is illegal. In this recipe we started
+numbering the subpopulations with p1, unlike the previous section. That means p1 is at index 0,
+p2 is at index 1, etc., and so i-1 translates i from ids, 1:5, into zero-based subset indices, 0:4.
+SLiMgui’s visualization of this population structure looks like what we wanted:
+This recipe uses only five subpopulations (subpopCount = 5), but again the code is general and
+may be scaled up to however many subpopulations you want in your metapopulation.
+p1
+p2
+p4 p3
+p5
+136
+5.3.3 A two-dimensional subpopulation matrix
+A third common population structure is a two-dimensional grid or matrix of subpopulations,
+representing a spatial metapopulation in which each subpopulation exchanges migrants only with
+its direct neighbors. SLiM has no intrinsic concept of geographic space in its simulations (unless
+continuous space is enabled; see chapter 17), but with a population structure like this a pseudogeographic
+regime can be imposed upon a SLiM simulation such that new beneficial mutations,
+for example, will spread from subpopulation to subpopulation in a similar manner to how they
+might spread across a real landscape.
+initialize() {
+initializeMutationRate(1e-7);
+initializeMutationType("m1", 0.5, "f", 0.0);
+initializeGenomicElementType("g1", m1, 1.0);
+initializeGenomicElement(g1, 0, 99999);
+initializeRecombinationRate(1e-8);
+}
+1 early() {
+metapopSide = 3; // number of subpops along one side of the grid
+metapopSize = metapopSide * metapopSide;
+for (i in 1:metapopSize)
+sim.addSubpop(i, 500);
+subpops = sim.subpopulations;
+for (x in 1:metapopSide)
+for (y in 1:metapopSide)
+{
+destID = (x - 1) + (y - 1) * metapopSide + 1;
+destSubpop = subpops[destID - 1];
+if (x > 1) // left to right
+destSubpop.setMigrationRates(destID - 1, 0.05);
+if (x < metapopSide) // right to left
+destSubpop.setMigrationRates(destID + 1, 0.05);
+if (y > 1) // top to bottom
+destSubpop.setMigrationRates(destID - metapopSide, 0.05);
+if (y < metapopSide) // bottom to top
+destSubpop.setMigrationRates(destID + metapopSide, 0.05);
+}
+}
+10000 late() { sim.outputFixedMutations(); }
+This code is a bit more complex than previous recipes. In the tick 1 event, we first decide how
+large of a metapopulation we want; metapopSide=3 means that we will make a 3x3
+metapopulation (trivially small, but easier to check for correctness). This can be scaled up
+arbitrarily; it works well in SLiMgui for values as large as a 1000x1000 metapopulation with 10
+individuals per subpopulation. We calculate the number of subpopulations we will need, and
+make them all with the first for loop.
+Then comes the trickier part. We loop over the grid of subpopulations using x and y, which
+each range from 1 to metapopSide. For each subpopulation in the grid, as determined by x and y,
+we calculate the ID of the subpopulation in destID, and then fetch the subpopulation itself into
+destSubpop, getting it from the simulation’s subpopulation array as before. We then set the
+migration into destSubpop from each of its four sides; if it is at the edge of the matrix, it receives no
+migrants from that side (although it would be trivial to modify this code to make a wrap-around
+pattern of migration simulating a toroidal world). Simple arithmetic is used to determine the
+identifier of neighboring subpopulations based upon destID.
+137
+SLiMgui’s visualization of this setup is complicated; it is not immediately obvious that it
+represents a two-dimensional metapopulation, but it does:
+However, SLiMgui has an alternate method of display for these population visualizations. If you
+control-click or right-click on the graph, you will get a pop-up menu. Select “Optimized
+Positions” from that menu, and you should see something more like this:
+Here it is much more obvious that the migration pattern is as desired. This positioning
+optimization algorithm is based on a concept called force-directed layout. It is a somewhat
+experimental feature in SLiMgui, and may not always give layouts that look good; it is also quite
+slow for layouts involving more than a dozen or so subpopulations. However, it is worth a try if
+you want to get a publication-worthy picture of your population structure.
+Speaking of “publication-worthy”, note that when you control-click or right-click on the
+visualization graph, the pop-up menu also has an item entitled “Copy Graph”. That copies the
+graph to the clipboard as a PDF – very handy for pasting into documents or slides.
+5.3.4 A random, sparse spatial metapopulation
+The recipe in section 5.3.3 showed how to make a small spatial metapopulation in which
+subpopulations are arranged spatially in a grid that is connected by orthogonal migration. Here
+we will extend that recipe to a larger size and a more random metapopulation configuration, and
+we’ll look at a very simple sweep of a beneficial mutation across the metapopulation.
+The initialize() callback for this model is largely unchanged from section 5.3.3:
+initialize() {
+initializeMutationRate(1e-7);
+initializeMutationType("m1", 0.5, "f", 0.0);
+initializeMutationType("m2", 0.5, "f", 0.3);
+initializeGenomicElementType("g1", m1, 1.0);
+initializeGenomicElement(g1, 0, 99999);
+initializeRecombinationRate(1e-8);
+}
+p1
+p2
+p3
+p4
+p6 p5
+p7
+p8
+p9
+p1 p2 p3
+p4 p5 p6
+p7 p8 p9
+138
+The only modification here is the addition of a new mutation type, m2, which has been defined
+to represent beneficial mutations (with a selection coefficient of 0.3). New mutations are still
+always neutral (mutation type m1); we will introduce the sweep mutation ourselves in script.
+The final output event is also unchanged:
+10000 late() { sim.outputFixedMutations(); }
+The interesting changes are to the 1 late() event that configures the initial state of the
+metapopulation:
+1 late() {
+mSide = 10; // number of subpops along one side of the grid
+for (i in 1:(mSide * mSide))
+sim.addSubpop(i, 500);
+subpops = sim.subpopulations;
+for (x in 1:mSide)
+for (y in 1:mSide)
+{
+destID = (x - 1) + (y - 1) * mSide + 1;
+ds = subpops[destID - 1];
+if (x > 1) // left to right
+ds.setMigrationRates(destID - 1, runif(1, 0.0, 0.05));
+if (x < mSide) // right to left
+ds.setMigrationRates(destID + 1, runif(1, 0.0, 0.05));
+if (y > 1) // top to bottom
+ds.setMigrationRates(destID - mSide, runif(1, 0.0, 0.05));
+if (y < mSide) // bottom to top
+ds.setMigrationRates(destID + mSide, runif(1, 0.0, 0.05));
+// set up SLiMgui's population visualization nicely
+xd = ((x - 1) / (mSide - 1)) * 0.9 + 0.05;
+yd = ((y - 1) / (mSide - 1)) * 0.9 + 0.05;
+ds.configureDisplay(c(xd, yd), 0.4);
+}
+// remove 25% of the subpopulations
+subpops[sample(0:99, 25)].setSubpopulationSize(0);
+// introduce a beneficial mutation
+target_subpop = sample(sim.subpopulations, 1);
+sample(target_subpop.haplosomes, 10).addNewDrawnMutation(m2, 20000);
+}
+This creates a 10×10 spatial metapopulation in much the same way as section 5.3.3 created a
+3×3 metapopulation: first by creating the subpopulations themselves in a simple loop, and then
+setting up the migration among them with a pair of nested loops over x and y (see section 5.3.3 for
+further comments on that basic design).
+For each subpopulation, however, it also does something new, under the “// set up SLiMgui”
+comment: it calculates a visual position for the subpopulation, as xd and yd, and then calls
+configureDisplay() on the subpopulation to tell SLiMgui to use that position in its display. The
+coordinate system used by SLiMgui for subpopulation display spans [0,1] in x and y, so the xd and
+yd values calculated here are within that range. We pass a value of 0.4 for the second parameter
+to configureDisplay(); this is a scaling factor for the circle used to represent the subpopulation,
+so here we are telling SLiMgui to use unusually small circles (so that all 100 subpopulations fit into
+the display without overlapping).
+139
+If we ran the model without this display configuration (just comment out the call to
+configureDisplay()), we would get the left-hand plot below; the subpopulations are all
+overlapping and nothing can be discerned at all. (The “Optimized Positions” technique shown in
+section 5.3.3 is not up to the task either; optimizing such a large network is a difficult problem.
+Perhaps that experimental feature will eventually be improved to the point that it produces
+acceptable results for this model, but at present it does not.) If we run it with the display
+configuration, we get the right-hand plot below, which is obviously much better:
+Looking at the right-hand visualization, it is now immediately apparent that this is not a
+complete metapopulation, but rather a sparse metapopulation in which some subpopulations are
+missing. That brings us to the next lines in the event:
+// remove 25% of the subpopulations
+subpops[sample(0:99, 25)].setSubpopulationSize(0);
+This takes a sample, of size 25, from the sequence 0:99, selects those subpopulations (using the
+subset operator on subpops), and sets their size to zero. As we saw in section 5.2.2, this removes
+those subpopulations from the simulation; any connections they have to other subpopulations by
+migration are broken. That one line, then, very easily produces a random sparse metapopulation.
+The only caveat is that, depending upon which subpopulations get removed, the remaining
+metapopulation might not be connected; there might be two or more isolated networks with no
+connection between them via migration at all. If that is undesirable, further steps would have to
+be taken to avoid that possibility.
+You might also notice that the arrows in the population visualization now vary in their
+thickness; this is because we now draw random migration rates using runif(), rather than using a
+fixed migration rate as we did in section 5.3.3. This code draws migration rates from a uniform
+distribution, and makes no attempt to ensure that migration rates between a given pair of
+subpopulations are symmetric. One could, of course, implement any pattern of migration, random
+or otherwise, that one wished.
+That brings us to the final lines of the event:
+// introduce a beneficial mutation
+target_subpop = sample(sim.subpopulations, 1);
+sample(target_subpop.haplosomes, 10).addNewDrawnMutation(m2, 20000);
+p1p2p3p6p8pp91p112 pp1135 pp1167 pp1189 pp2223 pp2245 pp2278 pp3209 pp3321 pp3343 pp3365 pp3387 p4p14p039 p5p45p35p25p14p94p84p74p64p54p44p342 pp5565 pp5587 pp6509 pp6631 pp6654 pp6698 pp7727 pp7789 pp8813 pp8847 pp8889 pp9901 p9p49p697 p9pp891900
+p1 p2 p4 p5 p6 p8 p9
+p12 p16 p17 p18 p19 p20
+p21 p22 p23 p24 p25 p27 p28 p29 p30
+p32 p34 p35 p36 p37 p38 p39 p40
+p41 p42 p43 p44 p45 p48 p49 p50
+p51 p54 p55 p57 p58 p60
+p61 p62 p63 p64 p65 p66 p68 p70
+p71 p73 p74 p75 p77 p78 p79 p80
+p81 p83 p84 p85 p87 p88 p89
+p91 p92 p93 p94 p95 p96 p97 p98
+140
+This manual will cover introduced mutations and selective sweeps in great detail in chapter 9,
+so this is just a tiny bit of foreshadowing of that complex topic. The idea here is simple: we choose
+one subpopulation from the subpopulations that remain in the model using sample(), and then we
+choose ten haplosomes at random from the chosen subpopulation again using sample() (starting
+with ten rather than just one to make it more likely that the mutation will not be lost due to drift
+early on, for pedagogical purposes), and finally we call addNewDrawnMutation() to add a new m2
+mutation to those ten haplosomes at position 20000. This code, then, introduces a beneficial
+mutation that will, we hope, sweep through our sparse metapopulation.
+And if it doesn’t get lost, and if the metapopulation is connected, sweep it does. Here is a
+screenshot from midway through the sweep (in a different random run than was shown above):
+As per the default behavior in SLiM, subpopulations are colored according to their mean fitness;
+populations where the sweep mutation is approaching fixation are thus a dark green, while
+populations that are still neutral are yellow. Note that the configureDisplay() method has a third
+(optional) argument that would allow us to customize the color of each subpopulation as well,
+coloring them according to whatever model variable we wish; we have not used that here, since
+the default fitness-based coloring is in fact exactly what we want.
+5.3.5 Reading a migration matrix from a file
+Sometimes, when modeling an empirical population, migration rates are specified in a file, and
+you would like to read that file in and create a corresponding SLiM model. This is very easy to
+accomplish using Eidos in SLiM. Let’s start by looking at a very simple migration matrix file:
+// For the recipe of section 5.3.5.
+// Format: <src>, <dest>, <rate>.
+1,1,0.78
+1,2,0.10
+1,3,0.12
+2,1,0.01
+2,2,0.96
+2,3,0.03
+3,1,0.33
+3,2,0.17
+3,3,0.50
+p1 p2 p3 p4 p6 p7 p8 p9 p10
+p11 p12 p13 p14 p15 p17 p19 p20
+p23 p24 p26 p27 p28 p29 p30
+p31 p32 p35 p36 p37 p38 p39
+p41 p42 p43 p45 p46 p47 p49 p50
+p51 p53 p54 p55 p57 p58 p59 p60
+p61 p63 p64 p65 p66 p68 p69 p70
+p71 p72 p75 p76 p77 p79 p80
+p83 p84 p86 p88 p89 p90
+p92 p93 p94 p95 p96 p97 p100
+141
+This file expresses the model’s migration rates as a series of lines, each of which is a series of
+comma-separated values; this format is often called a CSV file. Let us suppose that it exists on disk
+with the filename migration.csv. The first two lines are comments, describing the file. The rest of
+the lines each have three values: the identifier of the source subpopulation, the identifier of the
+destination subpopulation, and the migration rate (sometimes the destination is listed before the
+source in these sorts of files, so be careful). Note that there are lines expressing the fraction of
+each subpopulation that does not migrate – the remainder after all migrants have left. This is not
+optimal for SLiM’s purposes, but we want to work with the file as it is.
+We can read this file in and create a model based on it with a simple script:
+initialize() {
+initializeMutationRate(1e-7);
+initializeMutationType("m1", 0.5, "f", 0.0);
+initializeGenomicElementType("g1", m1, 1.0);
+initializeGenomicElement(g1, 0, 99999);
+initializeRecombinationRate(1e-8);
+}
+1 early() {
+for (i in 1:3)
+sim.addSubpop(i, 1000);
+subpops = sim.subpopulations;
+lines = readFile("migration.csv");
+lines = lines[substr(lines, 0, 1) != "//"];
+for (line in lines)
+{
+fields = strsplit(line, ",");
+i = asInteger(fields[0]);
+j = asInteger(fields[1]);
+m = asFloat(fields[2]);
+if (i != j)
+{
+p_i = subpops[subpops.id == i];
+p_j = subpops[subpops.id == j];
+p_j.setMigrationRates(p_i, m);
+}
+}
+}
+10000 late() { sim.outputFixedMutations(); }
+The tick 1 event is where the action is. It first creates the three subpopulations of the model
+with a simple for loop. It would be easy to extend this model to determine the number of
+subpopulations from the contents of the migration.csv file, and to read subpopulation sizes in
+from that file, and so forth. Here, however, we hard-code those values for simplicity. Once the
+subpopulations have been created, we cache the vector of subpopulations in subpops for brevity in
+the script that follows.
+Next, the script reads in the contents of the migration.csv file using readFile(). This creates a
+string vector, with each line of the file being a separate element in the vector. The following line
+uses the substr() function to find lines that begin with "//", and removes those lines by
+subsetting the lines vector, stripping out the comment lines from the file.
+Now we can loop through the lines with a for loop and handle each line in turn. The
+strsplit() function is used to split line into its components, separated by commas; this is often a
+142
+very convenient way to parse CSV files (but using the readCSV() function is often even easier – see
+section 8.2.2 for an example). The three values of the line are then extracted from the fields
+vector, which is of type string, and are converted to their appropriate types.
+The last block actually sets the migration rate. First it checks that i and j are not the same; this
+filters away the lines that express the non-migrating fractions, which SLiM does not need to know
+about. Then it looks up the subpopulations referenced by i and j, using the id property, which
+corresponds to the numeric part of the subpopulation’s symbol (i.e., subpopulation p3 has an id of
+3). Finally, it sets the migration rate from p_j to p_i to be the rate m that was read from the file.
+When executed, SLiMgui’s visualization of this population structure looks like this:
+That looks like what we would expect from looking at the file; p2 is a sink, p3 is a source, and
+p1 is close to balanced. This is a very simple population model, but this script could just as easily
+read in a migration matrix file for hundreds or even thousands of subpopulations; its code is quite
+general. As mentioned above, it could also easily be extended to read subpopulation sizes from
+the CSV file as well; indeed, other subpopulation properties, such as selfing rates and sex ratios,
+could also easily be added to the file format and set up by this script, and the script could easily be
+adapted to work with whatever empirical data files already exist.
