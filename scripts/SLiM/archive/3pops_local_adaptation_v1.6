@@ -15,6 +15,7 @@ initialize() {
 	
 	defineConstant("numPops", nrow(migrationInput)); // number of subpopulations
 	defineConstant("M", migrationInput); // migration rates: rows are source pops, columns are destination pops
+	defineConstant("gridSide", 5); // v1.6 uses a 5 by 5 population grid
 	
 	defineConstant("Tdelta", 4000); // climate shift generation
 	defineConstant("climate1", drop(climateInput[0,])); // baseline climate gradient: p0, p1, p2...
@@ -50,12 +51,18 @@ reproduction() {
 	for (i in 1:(numPops))
 		sim.addSubpop("p" + (i-1), 200);
 	
-	// Place populations left-to-right in SLiMgui, matching the climate gradient.
+	// Place populations in a 5 by 5 grid in SLiMgui.
+	// Real movement is handled below with takeMigrants().
 	subpops = sim.subpopulations;
-	for (pop in 0:(numPops - 1))
+	for (row in 0:(gridSide - 1))
 	{
-		xDisplay = 0.05 + (pop / (numPops - 1)) * 0.90;
-		subpops[pop].configureDisplay(c(xDisplay, 0.50), 0.25);
+		for (col in 0:(gridSide - 1))
+		{
+			pop = col + row * gridSide;
+			xDisplay = 0.05 + (col / (gridSide - 1)) * 0.90;
+			yDisplay = 0.05 + (row / (gridSide - 1)) * 0.90;
+			subpops[pop].configureDisplay(c(xDisplay, yDisplay), 0.20);
+		}
 	}
 }
 

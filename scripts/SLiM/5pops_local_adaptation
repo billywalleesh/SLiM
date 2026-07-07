@@ -3,9 +3,9 @@ initialize() {
 	
 	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/");
 	// Migration CSV must be square: one row and one column per population
-	defineConstant("migrationFile", inputDirectory + "migration_matrix_5pop.csv");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix_3pop.csv");
 	// Climate CSV must have one column for each population in the migration CSV
-	defineConstant("climateFile", inputDirectory + "climate_matrix_5pop.csv");
+	defineConstant("climateFile", inputDirectory + "climate_matrix_3pop.csv");
 	
 	migrationTable = readCSV(migrationFile, colNames=F);
 	climateTable = readCSV(climateFile, colNames=F);
@@ -49,14 +49,6 @@ reproduction() {
 1 early() {
 	for (i in 1:(numPops))
 		sim.addSubpop("p" + (i-1), 200);
-	
-	// Place populations left-to-right in SLiMgui, matching the climate gradient.
-	subpops = sim.subpopulations;
-	for (pop in 0:(numPops - 1))
-	{
-		xDisplay = 0.05 + (pop / (numPops - 1)) * 0.90;
-		subpops[pop].configureDisplay(c(xDisplay, 0.50), 0.25);
-	}
 }
 
 

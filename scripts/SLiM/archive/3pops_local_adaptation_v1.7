@@ -3,9 +3,9 @@ initialize() {
 	
 	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/");
 	// Migration CSV must be square: one row and one column per population
-	defineConstant("migrationFile", inputDirectory + "migration_matrix_v1.6.csv");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix_5pop.csv");
 	// Climate CSV must have one column for each population in the migration CSV
-	defineConstant("climateFile", inputDirectory + "climate_matrix_v1.6.csv");
+	defineConstant("climateFile", inputDirectory + "climate_matrix_5pop.csv");
 	
 	migrationTable = readCSV(migrationFile, colNames=F);
 	climateTable = readCSV(climateFile, colNames=F);
@@ -15,7 +15,6 @@ initialize() {
 	
 	defineConstant("numPops", nrow(migrationInput)); // number of subpopulations
 	defineConstant("M", migrationInput); // migration rates: rows are source pops, columns are destination pops
-	defineConstant("gridSize", 5); // v1.6 uses a 5 by 5 population grid
 	
 	defineConstant("Tdelta", 4000); // climate shift generation
 	defineConstant("climate1", drop(climateInput[0,])); // baseline climate gradient: p0, p1, p2...
@@ -50,22 +49,38 @@ reproduction() {
 1 early() {
 	for (i in 1:(numPops))
 		sim.addSubpop("p" + (i-1), 200);
-
-
-	// Place populations visualization in a 5 by 5 grid in SLiMgui.
+	
+	// Place populations in SLiMgui to match the test landscape.
 	// Real movement is handled below with takeMigrants().
 	subpops = sim.subpopulations;
-	for (row in 0:(gridSize - 1))
+	
+	if (testLandscape == "5pop")
 	{
-		for (col in 0:(gridSize - 1))
+		xPositions = c(0.50, 0.50, 0.90, 0.50, 0.10);
+		yPositions = c(0.50, 0.10, 0.50, 0.90, 0.50);
+		
+		for (pop in 0:(numPops - 1))
+			subpops[pop].configureDisplay(c(xPositions[pop], yPositions[pop]), 0.25);
+	}
+	
+	if (testLandscape == "10pop")
+	{
+		gridRows = 2;
+		gridCols = 5;
+		
+		for (row in 0:(gridRows - 1))
 		{
-			pop = col + row * gridSize;
-			xDisplay = 0.05 + (col / (gridSize - 1)) * 0.90;
-			yDisplay = 0.05 + (row / (gridSize - 1)) * 0.90;
-			subpops[pop].configureDisplay(c(xDisplay, yDisplay), 0.20);
+			for (col in 0:(gridCols - 1))
+			{
+				pop = col + row * gridCols;
+				xDisplay = 0.05 + (col / (gridCols - 1)) * 0.90;
+				yDisplay = 0.25 + row * 0.50;
+				subpops[pop].configureDisplay(c(xDisplay, yDisplay), 0.22);
+			}
 		}
 	}
 }
+
 
 // Set ageing, migration and survival 
 early() {
