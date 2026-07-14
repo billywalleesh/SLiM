@@ -1,0 +1,254 @@
+initialize() {
+	initializeSLiMModelType("nonWF"); // set non-WF model
+	
+	defineConstant("migrationInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/migration_matrix/");
+	defineConstant("climateInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/climate_matrix/");
+	defineConstant("rawClimateFile", "C:/Users/WilliamWallisch/msc_workspace/SLiM/data/raw/2m_temp_1940-2026.grib");
+	defineConstant("climatePrepScript", "C:/Users/WilliamWallisch/msc_workspace/SLiM/scripts/R/2_grib_climate_optimum_matrix_2pop.R");
+	
+	// Migration CSV must be square: one row and one column per population
+	defineConstant("migrationFile", migrationInputDirectory + "grib_migration_matrix_2pop.csv");
+	// The raw climate data is GRIB, but SLiM reads the small matrix made from that GRIB file.
+	defineConstant("climateFile", climateInputDirectory + "grib_climate_optimum_matrix_2pop.csv");
+	
+	migrationTable = readCSV(migrationFile, colNames=F);
+	climateTable = readCSV(climateFile, colNames=F);
+	
+	migrationInput = migrationTable.asMatrix();
+	print(migrationInput);//show the matrix
+	climateInput = climateTable.asMatrix();
+	print(climateInput);//show the matrix
+	
+	defineConstant("numPops", nrow(migrationInput)); // number of subpopulations
+	defineConstant("M", migrationInput); // migration rates: rows are source pops, columns are destination pops
+	
+	if (nrow(migrationInput) != ncol(migrationInput))
+		stop("Migration matrix must be square: one row and one column per population.");
+	
+	if (ncol(climateInput) != numPops)
+		stop("Climate matrix must have one column for each population in the migration matrix.");
+	
+	if (nrow(climateInput) < 2)
+		stop("Climate matrix needs at least two rows: baseline climate and shifted climate.");
+	
+	///// MIGRATION PAIR LIST
+	// Index migration matrix into list of migration pairs.
+	// 3-pop matrix, the first migration pairs are:
+	// migration pair 0: p0 sends migrants to p1 at rate 0.005
+	// migration pair 1: p0 sends migrants to p2 at rate 0.001
+	// migration pair 2: p1 sends migrants to p0 at rate 0.005 etc...
+	t_migrationPairSourcePop = c(); //temporary vectors
+	t_migrationPairDestinationPop = c();
+	t_migrationPairRate = c();
+	
+	//loop feeds the t_ vectors based on number of pops in csv input 
+	//for each source pop
+	for (sourcePop in 0:(numPops - 1))
+	{
+		//take each dest pop
+		for (destPop in 0:(numPops - 1))
+		{
+			//if they are the same skip
+			if (sourcePop == destPop)
+				next;
+			
+			//rate is row and column of csv file 
+			migrationRate = M[sourcePop, destPop];
+			
+			//skip rate 0
+			if (migrationRate == 0.0)
+				next;
+			
+			// Save one migration pair: source population, destination population, and rate.
+			t_migrationPairSourcePop = c(t_migrationPairSourcePop, sourcePop);
+			t_migrationPairDestinationPop = c(t_migrationPairDestinationPop, destPop);
+			t_migrationPairRate = c(t_migrationPairRate, migrationRate);
+		}
+	}
+	
+	//using these now full vectors we define the constants for each
+	defineConstant("migrationPairSourcePop", t_migrationPairSourcePop); //print(migrationPairSourcePop) = 0 0 1 1 2 2
+	defineConstant("migrationPairDestinationPop", t_migrationPairDestinationPop); //print(migrationPairDestinationPop)= 1 2 0 2 0 1
+	defineConstant("migrationPairRate", t_migrationPairRate); //print(migrationPairRate) = 0.005 0.001 0.005 0.005 0.001 0.005
+	defineConstant("numMigrationPairs", size(t_migrationPairRate)); //number of pairs present
+	
+	defineConstant("Tdelta", 4000); // climate shift generation
+	defineConstant("climate0", drop(climateInput[0,])); // baseline climate gradient: p0, p1, p2...
+	defineConstant("climate1", drop(climateInput[1,])); // shifted climate gradient: p0, p1, p2...
+	
+	initializeMutationRate(1e-7); // set standard mutation rate
+	initializeRecombinationRate(1e-8); // set standard recombination rate
+	initializeMutationType("m1", 0.5, "f", 0.0); // set neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // set mutations that will have an effect (defined here as neutral, but we'll add a phenotypic effect below). 
+	m2.color = "red"; // will be displayed in red in the output
+	initializeGenomicElementType("g1", c(m1,m2), c(0.99,0.01)); // set relative frequency: m2 is 1% of all mutations
+	initializeGenomicElement(g1, 0, 99999); // set genome size
+}
+
+// Set reproduction behavior: every individual gets a number of offspring from a poisson distriubtion of mean R. 
+reproduction() {
+	R = 1.01; // on average every individual 1.01 offspring
+	
+	// individuals reproduce locally, without dispersal
+	litterSize = rpois(1, R);
+	
+	for (i in seqLen(litterSize))
+	{
+		// generate each offspring with an independently drawn mate
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+// set size of sub pop at start: e.g. 200 in each 
+1 early() {
+	for (i in 1:(numPops))
+		sim.addSubpop("p" + (i-1), 200);
+}
+
+
+// Set ageing, migration and survival 
+1:6000 early() {
+	K=5000; // carrying capacity per sub-pop
+	
+	// AGE MORTALITY
+	// non-overlapping generations; kill off the parental generation
+	inds = sim.subpopulations.individuals; // get all the individuals
+	adults = inds[inds.age > 0];
+	
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+	
+	///// MIGRATION
+	// First choose migrants, then move them. This prevents an individual from migrating twice.
+	allMigrants = c(); //empty vector that will store all migrants each generation
+	allDestinations = c(); //empty vector that will store all destinations
+	
+	// Each source population draws its total number of migrants once.
+	// Then those migrants are assigned to destinations using that source population's migration pairs.
+	subpops = sim.subpopulations;
+	
+	for (sourcePop in 0:(numPops - 1))
+	{
+		// sourcePop is the matrix/index number; sourceSubpop is the actual SLiM population object.
+		// Example: if sourcePop = 0, then sourceSubpop = p0.
+		sourceSubpop = subpops[sourcePop];
+		
+		if (sourceSubpop.individualCount == 0)
+			next;
+		
+		// Find the migration pairs that start from this source population.
+		// In the 3-pop example, if sourcePop = 0, this returns migration pair 0 and migration pair 1:
+		// migration pair 0 = p0 -> p1, migration pair 1 = p0 -> p2.
+		popMigrationPairs = which(migrationPairSourcePop == sourcePop);
+		
+		if (size(popMigrationPairs) == 0)
+			next;
+		
+		// These vectors describe where migrants from this source population can go.
+		// For sourcePop = 0 in the 3-pop example:
+		// possibleDestinations = c(1, 2), meaning migrants can go to p1 or p2.
+		// migrationRates = c(0.005, 0.001), meaning p1 is more likely than p2.
+		possibleDestinations = migrationPairDestinationPop[popMigrationPairs];
+		migrationRates = migrationPairRate[popMigrationPairs];
+		
+		// Total probability that an individual leaves this source population at all.
+		// For p0 in the 3-pop example: 0.005 + 0.001 = 0.006.
+		totalMigrationRate = sum(migrationRates);
+		
+		if (totalMigrationRate > 1.0)
+			stop;
+		
+		if (totalMigrationRate == 0.0)
+			next;
+		
+		// Draw how many individuals leave this source population.
+		// If p0 has 5000 individuals and totalMigrationRate = 0.006,
+		// then the expected number of migrants is about 5000 * 0.006 = 30.
+		numMigrants = rbinom(1, sourceSubpop.individualCount, totalMigrationRate);
+		
+		if (numMigrants == 0)
+			next;
+		
+		// Choose the migrants, then assign each migrant to a destination.
+		// popMigrants are the actual individuals that leave the source population.
+		// popDestinations stores where each of those migrants will go.
+		popMigrants = sample(sourceSubpop.individuals, numMigrants);
+		// For p0 in the 3-pop example, destinations are sampled from c(1, 2)
+		// with weights c(0.005, 0.001). So about 83% go to p1 and 17% go to p2.
+		popDestinations = sample(possibleDestinations, numMigrants, replace=T, weights=migrationRates);
+		
+		// Add this source population's migrants to the generation-wide migration list.
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations = c(allDestinations, popDestinations);
+	}
+	
+	// After all migration decisions are made, move migrants into their destination populations.
+	if (size(allMigrants) > 0)
+	{
+		for (destPop in 0:(numPops - 1))
+		{
+			//when destSubpop = 1, it moves B and D to p1. When destSubpop = 2, it moves A to p2.
+			//allDestinations = [1, 1, 2]
+			//ex: when allDestinations == 1 and destPop = 1 we see [true, true, false]
+			migrants = allMigrants[allDestinations == destPop];
+			
+			if (size(migrants) > 0)
+				//ex : subpops[1].takeMigrants(c(B, D));
+				//ex : subpops[2].takeMigrants(A);
+				subpops[destPop].takeMigrants(migrants);
+		}
+	}
+	
+	// Climate selection after migration; migrants experience the climate of their destination.
+	if (sim.cycle >= 2000)
+	{
+		//climate0 [0,] else climate1 [1,]	
+		climates = (sim.cycle < Tdelta ? climate0 else climate1);
+		
+		for (subpop in sim.subpopulations)
+		{
+			if (subpop.individualCount == 0)
+				next;
+			
+			inds = subpop.individuals;
+			climate = climates[subpop.id]; // p0 = climate[x,0], p1 = climate[x,1], p2 = climate[x,2]...
+			
+			phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+			fitness = 1.0 - (phenotypes - climate)^2 * 0.05;
+			fitness[fitness < 0.0] = 0.0;
+			
+			inds.fitnessScaling = fitness;
+			inds.tagF = phenotypes;
+		}
+	}
+	
+	// post-migration density-dependent fitness for each subpop
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount > 0)
+			subpop.fitnessScaling = K / subpop.individualCount; // set fitness based on the maximal capacity of the sub-population (K)
+	}
+}
+
+///// FIRST PHASE: nothing happens
+// In the first 2000 generations: nothing happens --> all mutations build up as neutral, there is no selection in any population 
+
+
+
+///// SECOND AND THIRD PHASES: local adaptation, then climate shift
+// From generation 2000 to 3999: populations adapt to climate0.
+// From generation 4000 to 6000: populations experience climate1.
+// Climate fitness is calculated above in early() with vectorized individual calls.
+
+
+// Expected behavior: check population sizes and fitness over time. 
+// For the first 2000 gen: pop size gets rapidly to maximum capacity. Fitness is 1 in all individuals because there is no selection.
+// At 2000: selection kicks in. Populations adapt toward climate1 from the climate CSV.
+// At 4000: climate shifts to climate2 from the climate CSV.
+
+6000 late() {
+	sim.simulationFinished();
+}
+

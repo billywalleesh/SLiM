@@ -1,11 +1,12 @@
 initialize() {
 	initializeSLiMModelType("nonWF"); // set non-WF model
 	
-	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/");
+	defineConstant("migrationInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/pop_index_local_adaptation/migration_matrix/");
+	defineConstant("climateInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/pop_index_local_adaptation/climate_matrix/");
 	// Migration CSV must be square: one row and one column per population
-	defineConstant("migrationFile", inputDirectory + "migration_matrix_2pop.csv");
+	defineConstant("migrationFile", migrationInputDirectory + "migration_matrix_2pop.csv");
 	// Climate CSV must have one column for each population in the migration CSV
-	defineConstant("climateFile", inputDirectory + "climate_matrix_2pop.csv");
+	defineConstant("climateFile", climateInputDirectory + "climate_matrix_2pop.csv");
 	
 	migrationTable = readCSV(migrationFile, colNames=F);
 	climateTable = readCSV(climateFile, colNames=F);
