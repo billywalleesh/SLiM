@@ -27,9 +27,9 @@ climate_years_file <- file.path(input_directory, "climate_matrix/grib_climate_ye
 metadata_file <- file.path(input_directory, "metadata/grib_climate_matrix_10pop_metadata.csv")
 baseline_file <- file.path(input_directory, "metadata/grib_climate_matrix_10pop_baseline_metadata.csv")
 
-### The baseline should represent the climate each population is historically adapted to.
-### Earlier climate years can still be used in the time series; this only defines zero shift.
-baseline_years <- 1950:1970
+### Match the historical climate period used by SLiM before climate change begins.
+### This makes each population's mean climate shift from 1940-1970 equal to zero.
+baseline_years <- 1940:1970
 
 temperature <- rast(grib_file)
 population_locations <- read.csv(population_file)

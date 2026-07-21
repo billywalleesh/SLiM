@@ -1,0 +1,183 @@
+// Local adaptation to observed Swiss temperatures.
+// Phenotype is the number of m2 copies carried by an individual.
+
+initialize()
+{
+	initializeSLiMModelType("nonWF");
+
+	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_2pop.csv");
+	defineConstant("climateFile", inputDirectory + "climate_matrix/grib_climate_matrix_2pop_degrees_c.csv");
+	defineConstant("yearFile", inputDirectory + "climate_matrix/grib_climate_years_2pop_degrees_c.csv");
+
+	M = readCSV(migrationFile, colNames=F).asMatrix();
+	temperatures = readCSV(climateFile, colNames=F).asMatrix();
+	years = asInteger(drop(readCSV(yearFile, colNames=F).asMatrix()));
+
+	defineConstant("numPops", nrow(M));
+	if (ncol(M) != numPops)
+		stop("The migration matrix must be square.");
+	if (ncol(temperatures) != numPops | nrow(temperatures) != size(years))
+		stop("Climate columns must match populations, and climate rows must match years.");
+
+	defineConstant("migrationRates", M);
+	defineConstant("climateMatrix", temperatures);
+	defineConstant("climateYears", years);
+	defineConstant("K", 400);
+	defineConstant("R", 2.01);
+	defineConstant("TlocalAdaptation", 2000);
+	defineConstant("TclimateChange", 4000);
+
+	historicalRows = which(climateYears >= 1940 & climateYears <= 1970);
+	observedRows = which(climateYears >= 1970);
+	if (!size(historicalRows) | !size(observedRows))
+		stop("The climate file must contain the historical and observed periods.");
+
+	historicalMeans = c();
+	for (pop in 0:(numPops - 1))
+		historicalMeans = c(historicalMeans, mean(climateMatrix[historicalRows, pop]));
+
+	defineConstant("historicalMeanClimate", historicalMeans);
+	defineConstant("observedClimateRows", observedRows);
+	defineConstant("numObservedYears", size(observedRows));
+	defineConstant("Tend", TclimateChange + numObservedYears);
+
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral
+	initializeMutationType("m2", 0.5, "f", 0.0); // one copy = one phenotype unit
+	m2.convertToSubstitution = F;
+	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
+	initializeGenomicElement(g1, 0, 99999);
+}
+
+reproduction()
+{
+	for (offspring in seqLen(rpois(1, R)))
+	{
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+1 early()
+{
+	for (pop in 0:(numPops - 1))
+		sim.addSubpop("p" + pop, K);
+}
+
+1:Tend early()
+{
+	// Non-overlapping generations: only the newborn cohort continues.
+	adults = sim.subpopulations.individuals;
+	adults = adults[adults.age > 0];
+	if (adults.size())
+		sim.killIndividuals(adults);
+
+	// Choose every migrant before moving any of them, preventing double migration.
+	allMigrants = c();
+	allDestinations = c();
+	for (source in sim.subpopulations)
+	{
+		if (!source.individualCount)
+			next;
+
+		rates = drop(migrationRates[source.id,]);
+		rates[source.id] = 0.0;
+		leavingRate = sum(rates);
+		if (leavingRate > 1.0)
+			stop("Migration rates leaving a population cannot sum above 1.");
+		if (!leavingRate)
+			next;
+
+		nMigrants = rbinom(1, source.individualCount, leavingRate);
+		if (!nMigrants)
+			next;
+
+		migrants = sample(source.individuals, nMigrants);
+		destinations = sample(0:(numPops - 1), nMigrants,
+			replace=T, weights=rates);
+		allMigrants = c(allMigrants, migrants);
+		allDestinations = c(allDestinations, destinations);
+	}
+
+	if (size(allMigrants))
+		for (destination in sim.subpopulations)
+		{
+			migrants = allMigrants[allDestinations == destination.id];
+			if (migrants.size())
+				destination.takeMigrants(migrants);
+		}
+
+	// The optimum is ancestral, then ramps to each local historical mean,
+	// then follows one observed calendar year per generation.
+	if (sim.cycle <= TlocalAdaptation)
+	{
+		climates = rep(0.0, numPops);
+		currentYear = "ancestral";
+	}
+	else if (sim.cycle <= TclimateChange)
+	{
+		ramp = asFloat(sim.cycle - TlocalAdaptation) /
+			(TclimateChange - TlocalAdaptation);
+		climates = historicalMeanClimate * ramp;
+		currentYear = "runway";
+	}
+	else
+	{
+		observedIndex = min(sim.cycle - TclimateChange - 1,
+			numObservedYears - 1);
+		climateRow = observedClimateRows[observedIndex];
+		climates = drop(climateMatrix[climateRow,]);
+		currentYear = asString(climateYears[climateRow]);
+	}
+
+	// Mutation count is the phenotype; mismatch from local climate lowers survival.
+	for (subpop in sim.subpopulations)
+	{
+		if (!subpop.individualCount)
+			next;
+
+		inds = subpop.individuals;
+		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		fitness = 1.0 - (phenotypes - climates[subpop.id])^2 * 0.05;
+		fitness[fitness < 0.0] = 0.0;
+		inds.fitnessScaling = fitness;
+		inds.tagF = phenotypes;
+	}
+
+	// Density regulation combines multiplicatively with climate survival.
+	for (subpop in sim.subpopulations)
+		if (subpop.individualCount)
+			subpop.fitnessScaling = min(K / subpop.individualCount, 1.0);
+
+	sim.setValue("climates", climates);
+	sim.setValue("climateYear", currentYear);
+}
+
+1:Tend late()
+{
+	if (!sum(sim.subpopulations.individualCount))
+	{
+		catn("All populations extinct at tick " + sim.cycle + ".");
+		sim.simulationFinished();
+	}
+	else if (sim.cycle % 100 == 0 | sim.cycle > TclimateChange)
+	{
+		climates = sim.getValue("climates");
+		year = sim.getValue("climateYear");
+		for (subpop in sim.subpopulations)
+		{
+			meanPhenotype = subpop.individualCount ? mean(subpop.individuals.tagF) else NAN;
+			catn("Tick " + sim.cycle + " | Year: " + year + " | p" + subpop.id +
+				" : " + subpop.individualCount + " | Current phenotype : " +
+				meanPhenotype + " | Current Temp : " + climates[subpop.id] + " |");
+		}
+	}
+}
+
+Tend late()
+{
+	sim.simulationFinished();
+}

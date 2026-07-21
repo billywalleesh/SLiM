@@ -1,0 +1,304 @@
+initialize() {
+	initializeSLiMModelType("nonWF"); // set non-WF model
+	
+	defineConstant("migrationInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/migration_matrix/");
+	defineConstant("climateInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/climate_matrix/");
+	
+	// Migration CSV: rows are source populations and columns are destination populations.
+	defineConstant("migrationFile", migrationInputDirectory + "grib_migration_matrix_2pop.csv");
+	
+	// Climate CSV: rows are years, columns are populations, and values are degrees Celsius.
+	defineConstant("climateFile", climateInputDirectory + "grib_climate_matrix_2pop_degrees_c.csv");
+	defineConstant("climateYearsFile", climateInputDirectory + "grib_climate_years_2pop_degrees_c.csv");
+	
+	migrationTable = readCSV(migrationFile, colNames=F);
+	climateTable = readCSV(climateFile, colNames=F);
+	climateYearsTable = readCSV(climateYearsFile, colNames=F);
+	
+	migrationInput = migrationTable.asMatrix();
+	print(migrationInput);
+	climateInput = climateTable.asMatrix();
+	print(climateInput);
+	climateYearsInput = asInteger(drop(climateYearsTable.asMatrix()));
+	
+	defineConstant("numPops", nrow(migrationInput));
+	defineConstant("M", migrationInput);
+	
+	///// MIGRATION PAIR LIST
+	// Read every nonzero connection from the migration matrix once.
+	t_migrationPairSourcePop = c();
+	t_migrationPairDestinationPop = c();
+	t_migrationPairRate = c();
+	
+	for (sourcePop in 0:(numPops - 1))
+	{
+		for (destPop in 0:(numPops - 1))
+		{
+			if (sourcePop == destPop)
+				next;
+			
+			migrationRate = M[sourcePop, destPop];
+			
+			if (migrationRate == 0.0)
+				next;
+			
+			t_migrationPairSourcePop = c(t_migrationPairSourcePop, sourcePop);
+			t_migrationPairDestinationPop = c(t_migrationPairDestinationPop, destPop);
+			t_migrationPairRate = c(t_migrationPairRate, migrationRate);
+		}
+	}
+	
+	defineConstant("migrationPairSourcePop", t_migrationPairSourcePop);
+	defineConstant("migrationPairDestinationPop", t_migrationPairDestinationPop);
+	defineConstant("migrationPairRate", t_migrationPairRate);
+	
+	///// CLIMATE AND LOCAL ADAPTATION
+	defineConstant("climateMatrix", climateInput);
+	defineConstant("climateYears", climateYearsInput);
+	
+	// Generations 1-1999: locally adapted phenotype centers.
+	defineConstant("initialOptimum", c(9.0, 5.0));
+	defineConstant("minimumStartingMutations", c(8, 4));
+	defineConstant("maximumStartingMutations", c(10, 6));
+	
+	defineConstant("ThistoricalClimate", 2000); // 1940-1970 mean temperatures begin
+	defineConstant("TannualClimate", 4000); // annual temperatures begin
+	defineConstant("Tend", 6000);
+	
+	defineConstant("historicalClimateStartYear", 1940);
+	defineConstant("historicalClimateEndYear", 1970);
+	defineConstant("annualClimateStartYear", 1970);
+	
+	t_historicalClimateRows = which((climateYears >= historicalClimateStartYear) &
+		(climateYears <= historicalClimateEndYear));
+	t_annualClimateRows = which(climateYears >= annualClimateStartYear);
+	
+	if (size(t_historicalClimateRows) == 0)
+		stop("No historical climate rows were found.");
+	
+	if (size(t_annualClimateRows) == 0)
+		stop("No annual climate rows were found.");
+	
+	t_historicalMeanClimate = c();
+	
+	for (pop in 0:(numPops - 1))
+		t_historicalMeanClimate = c(t_historicalMeanClimate,
+			mean(climateMatrix[t_historicalClimateRows, pop]));
+	
+	defineConstant("historicalMeanClimate", t_historicalMeanClimate);
+	defineConstant("annualClimateRows", t_annualClimateRows);
+	defineConstant("numAnnualClimateRows", size(t_annualClimateRows));
+	
+	catn("Historical climate period = " + historicalClimateStartYear + "-" +
+		historicalClimateEndYear + " mean annual temperature.");
+	for (pop in 0:(numPops - 1))
+		catn("p" + pop + " mean: " + historicalMeanClimate[pop] + " degrees C.");
+	
+	initializeMutationRate(1e-7);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeMutationType("m2", 0.5, "f", 0.0);
+	m2.convertToSubstitution = F; // m2 copies must remain available for phenotype counting
+	m2.color = "red";
+	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
+	initializeGenomicElement(g1, 0, 99999);
+}
+
+// Every individual produces a Poisson-distributed number of offspring.
+reproduction() {
+	R = 1.01;
+	litterSize = rpois(1, R);
+	
+	for (i in seqLen(litterSize))
+	{
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+// Create the populations and give the founders standing m2 variation.
+1 early() {
+	for (i in 1:numPops)
+		sim.addSubpop("p" + (i - 1), 200);
+	
+	for (pop in 0:(numPops - 1))
+	{
+		founders = sim.subpopulations[pop].individuals;
+		
+		for (founder in founders)
+		{
+			numStartingMutations = rdunif(1,
+				minimumStartingMutations[pop],
+				maximumStartingMutations[pop]);
+			
+			for (mutationCopy in 1:numStartingMutations)
+			{
+				targetHaplosome = sample(founder.haplosomes, 1);
+				mutationPosition = rdunif(1, 0, 99999);
+				targetHaplosome.addNewDrawnMutation(m2, mutationPosition);
+			}
+		}
+	}
+	
+	// Confirm the founder distributions before migration begins.
+	catn("Founder phenotypes before migration:");
+	for (subpop in sim.subpopulations)
+	{
+		founderPhenotypes = asFloat(subpop.individuals.countOfMutationsOfType(m2));
+		catn("p" + subpop.id + ": N=" + subpop.individualCount +
+			", mean=" + mean(founderPhenotypes) +
+			", min=" + min(founderPhenotypes) +
+			", max=" + max(founderPhenotypes));
+	}
+}
+
+// Set ageing, migration, climate selection, and density regulation.
+1:6000 early() {
+	K = 500;
+	
+	///// AGE MORTALITY
+	// Use non-overlapping generations by removing the parental generation.
+	inds = sim.subpopulations.individuals;
+	adults = inds[inds.age > 0];
+	
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+	
+	///// MIGRATION
+	// Choose every migrant before moving anyone, preventing double migration.
+	allMigrants = c();
+	allDestinations = c();
+	subpops = sim.subpopulations;
+	
+	for (sourcePop in 0:(numPops - 1))
+	{
+		sourceSubpop = subpops[sourcePop];
+		
+		if (sourceSubpop.individualCount == 0)
+			next;
+		
+		popMigrationPairs = which(migrationPairSourcePop == sourcePop);
+		
+		if (size(popMigrationPairs) == 0)
+			next;
+		
+		possibleDestinations = migrationPairDestinationPop[popMigrationPairs];
+		migrationRates = migrationPairRate[popMigrationPairs];
+		totalMigrationRate = sum(migrationRates);
+		
+		if (totalMigrationRate > 1.0)
+			stop("Migration rate greater than 1.");
+		
+		numMigrants = rbinom(1, sourceSubpop.individualCount, totalMigrationRate);
+		
+		if (numMigrants == 0)
+			next;
+		
+		popMigrants = sample(sourceSubpop.individuals, numMigrants);
+		popDestinations = sample(possibleDestinations, numMigrants,
+			replace=T, weights=migrationRates);
+		
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations = c(allDestinations, popDestinations);
+	}
+	
+	// Move the planned migrants after all source populations have been sampled.
+	if (size(allMigrants) > 0)
+	{
+		for (destPop in 0:(numPops - 1))
+		{
+			migrants = allMigrants[allDestinations == destPop];
+			
+			if (size(migrants) > 0)
+				subpops[destPop].takeMigrants(migrants);
+		}
+	}
+	
+	///// CLIMATE SELECTION
+	// Migrants experience the climate of their destination population.
+	if (sim.cycle < ThistoricalClimate)
+	{
+		// Generations 1-1999: maintain adaptation around phenotypes 9 and 5.
+		climates = initialOptimum;
+	}
+	else if (sim.cycle < TannualClimate)
+	{
+		// Generations 2000-3999: use each population's 1940-1970 mean temperature.
+		climates = historicalMeanClimate;
+	}
+	else
+	{
+		// Generation 4000 uses 1970, generation 4001 uses 1971, and so on.
+		// After 2025, keep using the final complete annual temperature.
+		climateStep = sim.cycle - TannualClimate;
+		
+		if (climateStep >= numAnnualClimateRows)
+			climateStep = numAnnualClimateRows - 1;
+		
+		climateRow = annualClimateRows[climateStep];
+		climates = drop(climateMatrix[climateRow,]);
+	}
+	
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount == 0)
+			next;
+		
+		inds = subpop.individuals;
+		climate = climates[subpop.id];
+		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		
+		// Keep the original fitness equation unchanged.
+		fitness = 1.0 - (phenotypes - climate)^2 * 0.05;
+		fitness[fitness < 0.0] = 0.0;
+		
+		inds.fitnessScaling = fitness;
+		inds.tagF = phenotypes;
+	}
+	
+	///// DENSITY REGULATION
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount > 0)
+			subpop.fitnessScaling = K / subpop.individualCount;
+	}
+}
+
+// Report the phenotype distribution around each major climate transition.
+1:6000 late() {
+	if (sim.cycle == 1 | sim.cycle == 1999 | sim.cycle == 2000 |
+		sim.cycle == 4000)
+	{
+		catn("Phenotypes after survival in generation " + sim.cycle + ":");
+		
+		for (subpop in sim.subpopulations)
+		{
+			if (subpop.individualCount == 0)
+			{
+				catn("p" + subpop.id + ": extinct");
+				next;
+			}
+			
+			phenotypes = asFloat(subpop.individuals.countOfMutationsOfType(m2));
+			catn("p" + subpop.id + ": N=" + subpop.individualCount +
+				", mean=" + mean(phenotypes) +
+				", min=" + min(phenotypes) +
+				", max=" + max(phenotypes));
+		}
+	}
+}
+
+///// PHASE 1: standing local adaptation
+// Generations 1-1999: Zurich is centered on phenotype 9 and St. Gallen on phenotype 5.
+
+///// PHASE 2: historical mean temperature
+// Generations 2000-3999: optima are the 1940-1970 mean annual temperatures.
+
+///// PHASE 3: observed annual temperature
+// Generation 4000 begins with 1970 and advances one climate year per generation.
+// After the final complete year, 2025, the model holds that temperature constant.
+
+Tend late() {
+	sim.simulationFinished();
+}

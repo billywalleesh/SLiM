@@ -91,6 +91,7 @@ write.table(
 
 metadata <- data.frame(
 	pop = population_locations$pop,
+	location = population_locations$location,
 	lon = population_locations$lon,
 	lat = population_locations$lat,
 	baseline_temp_c = baseline_temp_c,

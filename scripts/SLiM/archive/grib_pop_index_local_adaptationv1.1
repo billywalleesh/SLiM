@@ -1,0 +1,333 @@
+initialize() {
+	initializeSLiMModelType("nonWF"); // set non-WF model
+	
+	defineConstant("migrationInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/migration_matrix/");
+	defineConstant("climateInputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/climate_matrix/");
+	// Migration CSV must be square: one row and one column per population
+	defineConstant("migrationFile", migrationInputDirectory + "grib_migration_matrix_2pop.csv");
+	// Climate CSV must have one column for each population in the migration CSV.
+	// Rows are climate years from the GRIB-derived climate shift matrix.
+	defineConstant("climateFile", climateInputDirectory + "grib_climate_matrix_2pop_degrees_c.csv");
+	defineConstant("climateYearsFile", climateInputDirectory + "grib_climate_years_2pop_degrees_c.csv");
+	
+	migrationTable = readCSV(migrationFile, colNames=F);
+	climateTable = readCSV(climateFile, colNames=F);
+	climateYearsTable = readCSV(climateYearsFile, colNames=F);
+	
+	migrationInput = migrationTable.asMatrix();
+	print(migrationInput);//show the matrix
+	climateInput = climateTable.asMatrix();
+	print(climateInput);//show the matrix
+	climateYearsInput = asInteger(drop(climateYearsTable.asMatrix()));
+	
+	defineConstant("numPops", nrow(migrationInput)); // number of subpopulations
+	defineConstant("M", migrationInput); // migration rates: rows are source pops, columns are destination pops
+	defineConstant("K", 400); // carrying capacity per subpopulation
+	defineConstant("R", 2.01); // mean offspring produced per individual
+	
+	///// MIGRATION PAIR LIST
+	// Index migration matrix into list of migration pairs.
+	// 3-pop matrix, the first migration pairs are:
+	// migration pair 0: p0 sends migrants to p1 at rate 0.005
+	// migration pair 1: p0 sends migrants to p2 at rate 0.001
+	// migration pair 2: p1 sends migrants to p0 at rate 0.005 etc...
+	t_migrationPairSourcePop = c(); //temporary vectors
+	t_migrationPairDestinationPop = c();
+	t_migrationPairRate = c();
+	
+	//loop feeds the t_ vectors based on number of pops in csv input 
+	//for each source pop
+	for (sourcePop in 0:(numPops - 1))
+	{
+		//take each dest pop
+		for (destPop in 0:(numPops - 1))
+		{
+			//if they are the same skip
+			if (sourcePop == destPop)
+				next;
+			
+			//rate is row and column of csv file 
+			migrationRate = M[sourcePop, destPop];
+			
+			//skip rate 0
+			if (migrationRate == 0.0)
+				next;
+			
+			// Save one migration pair: source population, destination population, and rate.
+			t_migrationPairSourcePop = c(t_migrationPairSourcePop, sourcePop);
+			t_migrationPairDestinationPop = c(t_migrationPairDestinationPop, destPop);
+			t_migrationPairRate = c(t_migrationPairRate, migrationRate);
+		}
+	}
+	
+	//using these now full vectors we define the constants for each
+	defineConstant("migrationPairSourcePop", t_migrationPairSourcePop); //print(migrationPairSourcePop) = 0 0 1 1 2 2
+	defineConstant("migrationPairDestinationPop", t_migrationPairDestinationPop); //print(migrationPairDestinationPop)= 1 2 0 2 0 1
+	defineConstant("migrationPairRate", t_migrationPairRate); //print(migrationPairRate) = 0.005 0.001 0.005 0.005 0.001 0.005
+	defineConstant("numMigrationPairs", size(t_migrationPairRate)); //number of pairs present
+	
+	///// ABSOLUTE TEMPERATURE MATRIX
+	// climateMatrix contains raw annual temperatures in degrees C.  Phenotypes and
+	// environmental optima use this same absolute temperature scale.
+	defineConstant("climateMatrix", climateInput);
+	defineConstant("climateYears", climateYearsInput);
+	
+	defineConstant("TlocalAdaptation", 2000); // end of ancestral optimum-0 burn-in
+	defineConstant("TclimateChange", 4000); // ramp reaches each historical mean
+	defineConstant("Tend", 4056); //sim ends 
+	
+	defineConstant("historicalClimateStartYear", 1940);
+	defineConstant("historicalClimateEndYear", 1970);
+	defineConstant("climateChangeStartYear", 1970);
+	
+	t_historicalClimateRows = which((climateYears >= historicalClimateStartYear) & (climateYears <= historicalClimateEndYear));
+	t_climateChangeRows = which(climateYears >= climateChangeStartYear);
+	
+	if (size(t_historicalClimateRows) == 0)
+		stop;
+	
+	if (size(t_climateChangeRows) == 0)
+		stop;
+	
+	t_historicalMeanClimate = c();
+	
+	for (pop in 0:(numPops - 1))
+		t_historicalMeanClimate = c(t_historicalMeanClimate, mean(climateMatrix[t_historicalClimateRows, pop]));
+	
+	defineConstant("historicalMeanClimate", t_historicalMeanClimate);
+	defineConstant("climateChangeRows", t_climateChangeRows);
+	defineConstant("numClimateChangeRows", size(t_climateChangeRows));
+	
+	catn("Historical climate period = " + historicalClimateStartYear + "-" + historicalClimateEndYear + " mean.");
+	for (pop in 0:(numPops - 1))
+		catn("p" + pop + " mean: " + historicalMeanClimate[pop] + ".");
+	
+	initializeMutationRate(1e-7); // set standard mutation rate
+	initializeRecombinationRate(1e-8); // set standard recombination rate
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // each m2 copy adds one unit to the counted phenotype
+	m2.convertToSubstitution = F;
+	m2.color = "red"; // will be displayed in red in the output
+	initializeGenomicElementType("g1", c(m1,m2), c(0.99,0.01));
+	initializeGenomicElement(g1, 0, 99999); // set genome size
+}
+
+// Match grib_pop_index_local_adaptation: Poisson reproduction with local mating.
+reproduction() {
+	litterSize = rpois(1, R);
+	for (i in seqLen(litterSize))
+	{
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+		if (mate.size())
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+// set size of sub pop at start: e.g. 200 in each 
+1 early() {
+	for (i in 1:(numPops))
+		sim.addSubpop("p" + (i-1), K);
+}
+
+// QTL effects contribute to phenotype only; climate mismatch determines fitness below.
+mutationEffect(m2) { return 1.0; }
+
+
+// Match grib_pop_index_local_adaptation: non-overlapping generations,
+// followed by migration, climate selection, and density regulation.
+1:6000 early() {
+	// Kill the parental generation.
+	inds = sim.subpopulations.individuals;
+	adults = inds[inds.age > 0];
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+
+	///// MIGRATION
+	// First choose migrants, then move them. This prevents an individual from migrating twice.
+	allMigrants = c(); //empty vector that will store all migrants each generation
+	allDestinations = c(); //empty vector that will store all destinations
+	
+	// Each source population draws its total number of migrants once.
+	// Then those migrants are assigned to destinations using that source population's migration pairs.
+	subpops = sim.subpopulations;
+	
+	for (sourcePop in 0:(numPops - 1))
+	{
+		// sourcePop is the matrix/index number; sourceSubpop is the actual SLiM population object.
+		// Example: if sourcePop = 0, then sourceSubpop = p0.
+		sourceSubpop = subpops[sourcePop];
+		
+		if (sourceSubpop.individualCount == 0)
+			next;
+		
+		// Find the migration pairs that start from this source population.
+		// In the 3-pop example, if sourcePop = 0, this returns migration pair 0 and migration pair 1:
+		// migration pair 0 = p0 -> p1, migration pair 1 = p0 -> p2.
+		popMigrationPairs = which(migrationPairSourcePop == sourcePop);
+		
+		if (size(popMigrationPairs) == 0)
+			next;
+		
+		// These vectors describe where migrants from this source population can go.
+		// For sourcePop = 0 in the 3-pop example:
+		// possibleDestinations = c(1, 2), meaning migrants can go to p1 or p2.
+		// migrationRates = c(0.005, 0.001), meaning p1 is more likely than p2.
+		possibleDestinations = migrationPairDestinationPop[popMigrationPairs];
+		migrationRates = migrationPairRate[popMigrationPairs];
+		
+		// Total probability that an individual leaves this source population at all.
+		// For p0 in the 3-pop example: 0.005 + 0.001 = 0.006.
+		totalMigrationRate = sum(migrationRates);
+		
+		if (totalMigrationRate > 1.0)
+			stop("Migration rate greater than 1.");
+		
+		if (totalMigrationRate == 0.0)
+			next;
+		
+		// Draw how many individuals leave this source population.
+		// If p0 has 5000 individuals and totalMigrationRate = 0.006,
+		// then the expected number of migrants is about 5000 * 0.006 = 30.
+		numMigrants = rbinom(1, sourceSubpop.individualCount, totalMigrationRate);
+		
+		if (numMigrants == 0)
+			next;
+		
+		// Choose the migrants, then assign each migrant to a destination.
+		// popMigrants are the actual individuals that leave the source population.
+		// popDestinations stores where each of those migrants will go.
+		popMigrants = sample(sourceSubpop.individuals, numMigrants);
+		// For p0 in the 3-pop example, destinations are sampled from c(1, 2)
+		// with weights c(0.005, 0.001). So about 83% go to p1 and 17% go to p2.
+		popDestinations = sample(possibleDestinations, numMigrants, replace=T, weights=migrationRates);
+		
+		// Add this source population's migrants to the generation-wide migration list.
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations = c(allDestinations, popDestinations);
+	}
+	
+	// After all migration decisions are made, move migrants into their destination populations.
+	if (size(allMigrants) > 0)
+	{
+		for (destPop in 0:(numPops - 1))
+		{
+			//when destSubpop = 1, it moves B and D to p1. When destSubpop = 2, it moves A to p2.
+			//allDestinations = [1, 1, 2]
+			//ex: when allDestinations == 1 and destPop = 1 we see [true, true, false]
+			migrants = allMigrants[allDestinations == destPop];
+			
+			if (size(migrants) > 0)
+				//ex : subpops[1].takeMigrants(c(B, D));
+				//ex : subpops[2].takeMigrants(A);
+				subpops[destPop].takeMigrants(migrants);
+		}
+	}
+	
+	///// PHASE 1: ANCESTRAL ENVIRONMENT
+	// The ancestral population begins with phenotype 0.  For the first 2000
+	// generations, phenotype 0 is also the best match to the environment.
+	if (sim.cycle <= TlocalAdaptation)
+	{
+		currentEnvironmentalOptima = rep(0.0, numPops);
+		currentClimateYear = historicalClimateStartYear;
+	}
+	///// PHASE 2: GRADUAL LOCAL ADAPTATION
+	// From generations 2001 to 4000, each population's environment gradually
+	// approaches its own historical mean temperature.  The fraction below is
+	// 0 just before the runway begins and exactly 1 at generation 4000.
+	else if (sim.cycle <= TclimateChange)
+	{
+		generationsIntoLocalAdaptation = sim.cycle - TlocalAdaptation;
+		localAdaptationDuration = TclimateChange - TlocalAdaptation;
+		proportionOfLocalAdaptationComplete =
+			asFloat(generationsIntoLocalAdaptation) / localAdaptationDuration;
+
+		currentEnvironmentalOptima = historicalMeanClimate *
+			proportionOfLocalAdaptationComplete;
+		currentClimateYear = historicalClimateEndYear;
+	}
+	///// PHASE 3: OBSERVED CLIMATE
+	// At generation 4001, selection follows the observed temperature from 1970.
+	// Each subsequent generation represents the next observed climate year.
+	// Once the observations end, the final recorded temperature is maintained.
+	else
+	{
+		generationsOfObservedClimate = sim.cycle - (TclimateChange + 1);
+		if (generationsOfObservedClimate >= numClimateChangeRows)
+			generationsOfObservedClimate = numClimateChangeRows - 1;
+
+		observedClimateRow = climateChangeRows[generationsOfObservedClimate];
+		currentEnvironmentalOptima = drop(climateMatrix[observedClimateRow,]);
+		currentClimateYear = climateYears[observedClimateRow];
+	}
+
+	// Use the current environmental values as the climate optima for selection.
+	climates = currentEnvironmentalOptima;
+
+	// Save the current environment so it can also be printed during late().
+	sim.setValue("currentOptima", climates);
+	sim.setValue("currentClimateYear", currentClimateYear);
+
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount == 0)
+			next;
+		
+		inds = subpop.individuals;
+		climate = climates[subpop.id]; // p0 = climates[0], p1 = climates[1], p2 = climates[2]...
+		
+		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		fitness = 1.0 - (phenotypes - climate)^2 * 0.05;
+		fitness[fitness < 0.0] = 0.0;
+		
+		inds.fitnessScaling = fitness;
+		inds.tagF = phenotypes;
+	}
+	
+	// Same density structure as grib_pop_index_local_adaptation, with an explicit
+	// cap of 1.0 so density regulation does not boost individual survival.
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount > 0)
+			subpop.fitnessScaling = min(K / subpop.individualCount, 1.0);
+	}
+}
+
+///// ANCESTRAL AND LOCAL-ADAPTATION PHASES
+// Generations 1-2000 favor ancestral phenotype 0.  Generations 2001-4000 ramp
+// smoothly to each population's absolute historical mean temperature.
+
+///// ANNUAL CLIMATE PHASE
+// Generation 4001 begins with the first absolute observed temperature (1970).
+// After 2025, the final observed temperature is held constant.
+
+// Human-readable output: tick, climate year, population size, mean phenotype,
+// and the current local temperature optimum.
+1:6000 late() {
+	if ((sim.cycle % 100 == 0) |
+		(sim.cycle > TclimateChange & sim.cycle <= (TclimateChange + numClimateChangeRows)))
+	{
+		optima = sim.getValue("currentOptima");
+		climateYear = sim.getValue("currentClimateYear");
+		for (subpop in sim.subpopulations)
+		{
+			if (subpop.individualCount == 0)
+			{
+				catn("Tick " + sim.cycle + " | Year: " + climateYear +
+					" | p" + subpop.id + " : 0 | Current phenotype : NA" +
+					" | Current Temp : " + optima[subpop.id] + " |");
+				next;
+			}
+			phenotypes = subpop.individuals.tagF;
+			catn("Tick " + sim.cycle + " | Year: " + climateYear +
+				" | p" + subpop.id + " : " + subpop.individualCount +
+				" | Current phenotype : " + mean(phenotypes) +
+				" | Current Temp : " + optima[subpop.id] + " |");
+		}
+	}
+}
+
+Tend late() {
+	sim.simulationFinished();
+}
+
