@@ -32,9 +32,9 @@ initialize()
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
 	defineConstant("K", 500);
-	defineConstant("R", 2.01);
-	defineConstant("TlocalAdaptation", 2000);
-	defineConstant("TclimateChange", 4000);
+	defineConstant("R", 1.01);
+	defineConstant("TlocalAdaptation", 2000); // historical mean is reached
+	defineConstant("TclimateChange", 4000); // observed climate begins
 	
 	// Find the historical years and observed climate years
 	historicalRows = which((climateYears >= 1940) & (climateYears <= 1970));
@@ -51,7 +51,7 @@ initialize()
 	defineConstant("historicalMeanClimate", historicalMeans);
 	defineConstant("observedClimateRows", observedRows);
 	defineConstant("numObservedYears", size(observedRows));
-	defineConstant("Tend", TclimateChange + numObservedYears);
+	defineConstant("Tend", TclimateChange + numObservedYears - 1);
 	
 	for (pop in 0:(numPops - 1))
 		catn("p" + pop + " 1940-1970 mean °C: " + historicalMeanClimate[pop] + ".");
@@ -157,44 +157,36 @@ reproduction()
 	
 	
 	///// CURRENT CLIMATE
-	// Phase 1: the ancestral optimum is zero
-	if (sim.cycle <= TlocalAdaptation)
+	// Phase 1: ticks 1-1999 gradually approach each historical mean
+	if (sim.cycle < TlocalAdaptation)
 	{
-		climates = rep(0.0, numPops);
-		currentYear = "Ancestral";
-	}
-	
-	// Phase 2: gradually approach each historical mean temperature
-	else if (sim.cycle <= TclimateChange)
-	{
-		adaptGenerations = sim.cycle - TlocalAdaptation;
-		totalAdaptGenerations = TclimateChange - TlocalAdaptation;
-		adaptProgress = asFloat(adaptGenerations) /
-			totalAdaptGenerations;
-		
+		adaptProgress = asFloat(sim.cycle) / TlocalAdaptation;
 		climates = historicalMeanClimate * adaptProgress;
-		//adaptProgress - tick 2001 = (2001−2000)/2000 = 0.0005
-		//adaptProgress - tick 4000 = (4000−2000)/2000 = 1.00
 		currentYear = "Local Adaptation";
 	}
 	
-	// Phase 3: use one observed climate year per generation
+	// Phase 2: ticks 2000-3999 remain at each historical mean
+	else if (sim.cycle < TclimateChange)
+	{
+		climates = historicalMeanClimate;
+		currentYear = "Historical Mean";
+	}
+	
+	// Phase 3: tick 4000 begins the observed climate record with 1970
 	else
-	{	//observedYearIndex = tick - 4001 - 1
-		//observedYearIndex = 0
-		climateYearIndex = sim.cycle - TclimateChange - 1;
+	{
+		climateYearIndex = sim.cycle - TclimateChange;
 		
 		if (climateYearIndex >= numObservedYears)
 			climateYearIndex = numObservedYears - 1;
-			
+		
 		//observedClimateRows = c(30 (1970), 31, 32, 33...);
 		climateRow = observedClimateRows[climateYearIndex];
-		//climateRow = observedClimateRows[0];
 		climates = drop(climateMatrix[climateRow,]);
 		//climates = drop(climateMatrix[30,]); = ex : [30,] p0: 11.0289 , p1: 9.9053
 		currentYear = asString(climateYears[climateRow]);
 		
-		//tick : 4001, Observed-year index: 0, Calendar year: 1970 
+		//tick 4000, climateYearIndex 0, calendar year 1970
 	}
 	
 	
@@ -220,14 +212,8 @@ reproduction()
 	for (subpop in sim.subpopulations)
 	{
 		if (subpop.individualCount > 0)
-		{
-			densityFitness = K / subpop.individualCount;
-			
-			if (densityFitness > 1.0)
-				densityFitness = 1.0;
-			
-			subpop.fitnessScaling = densityFitness;
-		}
+			subpop.fitnessScaling =
+			min(K / subpop.individualCount, 1.5);
 	}
 	
 	// Save climate values for the output event
@@ -253,7 +239,7 @@ reproduction()
 		if (sim.cycle % 100 == 0)
 			outputThisGeneration = T;
 		
-		if (sim.cycle > TclimateChange)
+		if (sim.cycle >= TclimateChange)
 			outputThisGeneration = T;
 		
 		if (outputThisGeneration)
