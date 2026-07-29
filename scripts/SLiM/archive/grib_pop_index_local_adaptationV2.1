@@ -1,0 +1,419 @@
+// Local adaptation to observed Swiss temperatures
+// All populations share one starting mean thermal phenotype.
+// Standing warm and cold alleles give individuals different phenotypes.
+
+initialize()
+{
+	initializeSLiMModelType("nonWF");
+	
+	// Input files
+	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_2pop.csv");
+	defineConstant("climateFile", inputDirectory + "climate_matrix/grib_climate_matrix_2pop_degrees_c.csv");
+	defineConstant("yearFile", inputDirectory + "climate_matrix/grib_climate_years_2pop_degrees_c.csv");
+	
+	// Read the migration data
+	migrationTable = readCSV(migrationFile, colNames=F);
+	migrationInput = migrationTable.asMatrix();
+	print(migrationInput);
+	
+	// Read the climate data
+	climateTable = readCSV(climateFile, colNames=F);
+	climateInput = climateTable.asMatrix();
+	print(climateInput);
+	
+	// Read the climate years
+	yearTable = readCSV(yearFile, colNames=F);
+	yearMatrix = yearTable.asMatrix();
+	yearInput = asInteger(drop(yearMatrix));
+	
+	// Main model parameters
+	defineConstant("numPops", nrow(migrationInput));
+	defineConstant("migrationMatrix", migrationInput);
+	defineConstant("climateMatrix", climateInput);
+	defineConstant("climateYears", yearInput);
+	defineConstant("K", 5000);
+	defineConstant("R", 1.01);
+	defineConstant("effectPerMutation", 0.1);
+	defineConstant("selectionStrength", 0.05);
+	defineConstant("numberOfStandingLoci", 20);
+	defineConstant("chromosomeLength", 5000);
+	defineConstant("TlocalAdaptation", 2000);
+	defineConstant("TclimateChange", 4000);
+	
+	// Find the historical years and observed climate years
+	historicalRows = which((climateYears >= 1940) &
+		(climateYears <= 1970));
+	observedRows = which(climateYears >= 1970);
+	
+	// Calculate the historical mean temperature for every population
+	historicalMeans = c();
+	
+	for (pop in 0:(numPops - 1))
+	{
+		popHistoricalMean =
+			mean(climateMatrix[historicalRows, pop]);
+		
+		historicalMeans =
+			c(historicalMeans, popHistoricalMean);
+	}
+	
+	defineConstant("historicalMeanClimate", historicalMeans);
+	
+	// Calculate one shared baseline from all population historical means
+	defineConstant("baselinePhenotype",
+		mean(historicalMeanClimate));
+	
+	defineConstant("observedClimateRows", observedRows);
+	defineConstant("numObservedYears", size(observedRows));
+	defineConstant("Tend",
+		TclimateChange + numObservedYears - 1);
+	
+	catn("Shared baseline thermal phenotype: " +
+		baselinePhenotype + " degrees C.");
+	
+	for (pop in 0:(numPops - 1))
+	{
+		catn("p" + pop + " 1940-1970 mean: " +
+			historicalMeanClimate[pop] + " degrees C.");
+	}
+	
+	// Genetics
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral
+	initializeMutationType("m2", 0.5, "f", 0.0); // warm
+	initializeMutationType("m3", 0.5, "f", 0.0); // cold
+	
+	// Keep fixed phenotype mutations on the genomes because phenotype
+	// is calculated by counting them
+	m2.convertToSubstitution = F;
+	m3.convertToSubstitution = F;
+	m2.color = "red";
+	m3.color = "blue";
+	
+	// New mutations remain 99% neutral, 0.5% warm and 0.5% cold
+	initializeGenomicElementType("g1", c(m1, m2, m3),
+		c(0.99, 0.005, 0.005));
+	
+	// Put one QTL on each chromosome so the loci assort independently.
+	// Twenty chromosomes of 5,000 bases keep the original 100 kb total.
+	for (chromosome in 1:numberOfStandingLoci)
+	{
+		initializeChromosome(chromosome, chromosomeLength, "A");
+		initializeGenomicElement(g1, 0, chromosomeLength - 1);
+		initializeMutationRate(1e-7);
+		initializeRecombinationRate(1e-8);
+	}
+}
+
+
+// Each individual produces a Poisson-distributed number of offspring
+reproduction()
+{
+	litterSize = rpois(1, R);
+	
+	for (offspring in seqLen(litterSize))
+	{
+		mate = subpop.sampleIndividuals(1,
+			exclude=individual);
+		
+		if (mate.size() > 0)
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+
+// Create the populations and give them standing genetic variation
+1 early()
+{
+	for (pop in 0:(numPops - 1))
+		sim.addSubpop("p" + pop, K);
+	
+	// At every locus, half of the chromosomes receive the warm allele
+	// and half receive the cold allele. Therefore, the mean genetic
+	// effect is zero, but individuals have different phenotypes.
+	for (chromosome in 1:numberOfStandingLoci)
+	{
+		allWarmHaplosomes = c();
+		allColdHaplosomes = c();
+		
+		for (subpop in sim.subpopulations)
+		{
+			haplosomes = subpop.individuals.
+				haplosomesForChromosomes(chromosome);
+			numberWarm = asInteger(size(haplosomes) / 2);
+			
+			isWarm = rep(F, size(haplosomes));
+			warmIndexes =
+				sample(0:(size(haplosomes) - 1), numberWarm);
+			isWarm[warmIndexes] = T;
+			
+			allWarmHaplosomes =
+				c(allWarmHaplosomes, haplosomes[isWarm]);
+			allColdHaplosomes =
+				c(allColdHaplosomes, haplosomes[!isWarm]);
+		}
+		
+		mutationPosition = asInteger(chromosomeLength / 2);
+		
+		allWarmHaplosomes.addNewDrawnMutation(
+			m2, mutationPosition);
+		allColdHaplosomes.addNewDrawnMutation(
+			m3, mutationPosition);
+	}
+	
+	// Confirm that the populations begin at the shared baseline
+	catn("Starting standing genetic variation:");
+	
+	for (subpop in sim.subpopulations)
+	{
+		inds = subpop.individuals;
+		warmCounts =
+			asFloat(inds.countOfMutationsOfType(m2));
+		coldCounts =
+			asFloat(inds.countOfMutationsOfType(m3));
+		startingPhenotypes = baselinePhenotype +
+			(warmCounts - coldCounts) * effectPerMutation;
+		
+		catn("p" + subpop.id +
+			" | Mean phenotype: " + mean(startingPhenotypes) +
+			" | Phenotype SD: " + sd(startingPhenotypes) +
+			" | Mean warm count: " + mean(warmCounts) +
+			" | Mean cold count: " + mean(coldCounts));
+	}
+}
+
+
+// Demography, migration, climate selection and density regulation
+1:Tend early()
+{
+	///// NON-OVERLAPPING GENERATIONS
+	allIndividuals = sim.subpopulations.individuals;
+	adults = allIndividuals[allIndividuals.age > 0];
+	
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+	
+	
+	///// MIGRATION
+	// First choose every migrant without moving anyone
+	allMigrants = c();
+	allDestinations = c();
+	
+	for (sourcePop in 0:(numPops - 1))
+	{
+		sourceSubpop = sim.subpopulations[sourcePop];
+		
+		if (sourceSubpop.individualCount == 0)
+			next;
+		
+		migrationRates =
+			drop(migrationMatrix[sourcePop,]);
+		migrationRates[sourcePop] = 0.0;
+		totalMigrationRate = sum(migrationRates);
+		
+		if (totalMigrationRate > 1.0)
+			stop("Migration rates leaving a population cannot sum above 1.");
+		
+		if (totalMigrationRate == 0.0)
+			next;
+		
+		numMigrants = rbinom(1,
+			sourceSubpop.individualCount,
+			totalMigrationRate);
+		
+		if (numMigrants == 0)
+			next;
+		
+		popMigrants =
+			sample(sourceSubpop.individuals, numMigrants);
+		popDestinations =
+			sample(0:(numPops - 1), numMigrants,
+				replace=T, weights=migrationRates);
+		
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations =
+			c(allDestinations, popDestinations);
+	}
+	
+	// Move the migrants after every migration choice has been made
+	if (size(allMigrants) > 0)
+	{
+		for (destinationPop in 0:(numPops - 1))
+		{
+			migrants =
+				allMigrants[allDestinations == destinationPop];
+			
+			if (size(migrants) > 0)
+				sim.subpopulations[destinationPop].takeMigrants(
+					migrants);
+		}
+	}
+	
+	
+	///// CURRENT CLIMATE
+	// Phase 1: ticks 1-2000 move from the shared baseline to each
+	// population's own historical mean
+	if (sim.cycle <= TlocalAdaptation)
+	{
+		adaptProgress = asFloat(sim.cycle - 1) /
+			(TlocalAdaptation - 1);
+		
+		climates = baselinePhenotype +
+			(historicalMeanClimate - baselinePhenotype) *
+			adaptProgress;
+		
+		currentYear = "Local Adaptation";
+	}
+	
+	// Phase 2: ticks 2001-3999 remain at each historical mean
+	else if (sim.cycle < TclimateChange)
+	{
+		climates = historicalMeanClimate;
+		currentYear = "Historical Mean";
+	}
+	
+	// Phase 3: tick 4000 begins the observed climate record with 1970
+	else
+	{
+		climateYearIndex =
+			sim.cycle - TclimateChange;
+		
+		if (climateYearIndex >= numObservedYears)
+			climateYearIndex = numObservedYears - 1;
+		
+		climateRow =
+			observedClimateRows[climateYearIndex];
+		climates = drop(climateMatrix[climateRow,]);
+		currentYear =
+			asString(climateYears[climateRow]);
+	}
+	
+	
+	///// PHENOTYPE AND CLIMATE FITNESS
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount == 0)
+			next;
+		
+		inds = subpop.individuals;
+		climate = climates[subpop.id];
+		
+		warmMutations =
+			asFloat(inds.countOfMutationsOfType(m2));
+		coldMutations =
+			asFloat(inds.countOfMutationsOfType(m3));
+		
+		breedingValues =
+			(warmMutations - coldMutations) *
+			effectPerMutation;
+		phenotypes =
+			baselinePhenotype + breedingValues;
+		
+		fitness = 1.0 -
+			(phenotypes - climate)^2 *
+			selectionStrength;
+		fitness[fitness < 0.0] = 0.0;
+		
+		inds.fitnessScaling = fitness;
+		inds.tagF = phenotypes;
+	}
+	
+	
+	///// DENSITY REGULATION
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount > 0)
+		{
+			subpop.fitnessScaling =
+				min(K / subpop.individualCount, 1.5);
+		}
+	}
+	
+	// Save climate values for the output event
+	sim.setValue("currentClimates", climates);
+	sim.setValue("currentClimateYear", currentYear);
+}
+
+
+// Print results and stop if every population is extinct
+1:Tend late()
+{
+	totalPopulationSize =
+		sum(sim.subpopulations.individualCount);
+	
+	if (totalPopulationSize == 0)
+	{
+		catn("All populations extinct at tick " +
+			sim.cycle + ".");
+		sim.simulationFinished();
+	}
+	else
+	{
+		outputThisGeneration = F;
+		
+		if (sim.cycle % 100 == 0)
+			outputThisGeneration = T;
+		
+		if (sim.cycle >= TclimateChange)
+			outputThisGeneration = T;
+		
+		if (outputThisGeneration)
+		{
+			climates =
+				sim.getValue("currentClimates");
+			currentYear =
+				sim.getValue("currentClimateYear");
+			
+			for (subpop in sim.subpopulations)
+			{
+				if (subpop.individualCount == 0)
+				{
+					catn("Tick " + sim.cycle +
+						" | Year: " + currentYear +
+						" | p" + subpop.id + " : 0" +
+						" | Current mean phenotype : NA" +
+						" | Phenotype SD : NA" +
+						" | Mean warm count : NA" +
+						" | Mean cold count : NA" +
+						" | Current Temp : " +
+						climates[subpop.id] + " |");
+				}
+				else
+				{
+					inds = subpop.individuals;
+					phenotypes = inds.tagF;
+					warmCounts = asFloat(
+						inds.countOfMutationsOfType(m2));
+					coldCounts = asFloat(
+						inds.countOfMutationsOfType(m3));
+					phenotypeSD = 0.0;
+					
+					if (size(phenotypes) > 1)
+						phenotypeSD = sd(phenotypes);
+					
+					catn("Tick " + sim.cycle +
+						" | Year: " + currentYear +
+						" | p" + subpop.id + " : " +
+						subpop.individualCount +
+						" | Current mean phenotype : " +
+						mean(phenotypes) +
+						" | Phenotype SD : " +
+						phenotypeSD +
+						" | Mean warm count : " +
+						mean(warmCounts) +
+						" | Mean cold count : " +
+						mean(coldCounts) +
+						" | Current Temp : " +
+						climates[subpop.id] + " |");
+				}
+			}
+		}
+	}
+}
+
+
+// Finish after the final observed climate year
+Tend late()
+{
+	sim.simulationFinished();
+}

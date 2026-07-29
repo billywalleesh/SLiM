@@ -1,5 +1,14 @@
 // Local adaptation to observed Swiss temperatures
-// An individual's phenotype is the number of m2 mutations it carries
+// Temperature is converted to an optimal number of m2 mutation copies.
+
+function (float) temperatureToAlleleOptimum(float temperatures)
+{
+	return startAlleleOptimum +
+		(temperatures - startTemperature) *
+		(endAlleleOptimum - startAlleleOptimum) /
+		(endTemperature - startTemperature);
+}
+
 
 initialize()
 {
@@ -14,12 +23,12 @@ initialize()
 	// Read the migration data
 	migrationTable = readCSV(migrationFile, colNames=F);
 	migrationInput = migrationTable.asMatrix();
-	print(migrationInput);//show the matrix
+	print(migrationInput);
 	
 	// Read the climate data
 	climateTable = readCSV(climateFile, colNames=F);
 	climateInput = climateTable.asMatrix();
-	print(climateInput);//show the matrix
+	print(climateInput);
 	
 	// Read the climate years
 	yearTable = readCSV(yearFile, colNames=F);
@@ -31,38 +40,68 @@ initialize()
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 500);
+	defineConstant("K", 5000);
 	defineConstant("R", 1.01);
-	defineConstant("TlocalAdaptation", 2000); // historical mean is reached
-	defineConstant("TclimateChange", 4000); // observed climate begins
+	defineConstant("selectionStrength", 0.05);
+	defineConstant("TlocalAdaptation", 2000);
+	defineConstant("TclimateChange", 4000);
 	
 	// Find the historical years and observed climate years
 	historicalRows = which((climateYears >= 1940) & (climateYears <= 1970));
 	observedRows = which(climateYears >= 1970);
 	
 	// Calculate the historical mean temperature for every population
-	historicalMeans = c();
-	for (pop in 0:(numPops - 1))
-	{
-		popHistoricalMean = mean(climateMatrix[historicalRows, pop]);
-		historicalMeans = c(historicalMeans, popHistoricalMean);
-	}
+	historicalMeans = apply(climateMatrix[historicalRows, ], 1,
+		"mean(applyValue);");
 	
 	defineConstant("historicalMeanClimate", historicalMeans);
 	defineConstant("observedClimateRows", observedRows);
 	defineConstant("numObservedYears", size(observedRows));
 	defineConstant("Tend", TclimateChange + numObservedYears - 1);
 	
+	// Shared temperature-to-allele scale:
+	// p1's historical mean is optimal for 2 copies;
+	// p0's temperature in the final observed year is optimal for 6 copies.
+	finalObservedRow = observedClimateRows[numObservedYears - 1];
+	defineConstant("startTemperature", historicalMeanClimate[1]);
+	defineConstant("endTemperature", climateMatrix[finalObservedRow, 0]);
+	defineConstant("startAlleleOptimum", 2.0);
+	defineConstant("endAlleleOptimum", 6.0);
+	
+	if (endTemperature <= startTemperature)
+		stop("End temperature must be above start temperature.");
+	
+	catn("Temperature-to-allele scale:");
+	catn(startTemperature + " degrees C = " +
+		startAlleleOptimum + " optimal m2 copies.");
+	catn(endTemperature + " degrees C = " +
+		endAlleleOptimum + " optimal m2 copies.");
+	
 	for (pop in 0:(numPops - 1))
-		catn("p" + pop + " 1940-1970 mean °C: " + historicalMeanClimate[pop] + ".");
+	{
+		historicalOptimum =
+			temperatureToAlleleOptimum(historicalMeanClimate[pop]);
+		finalOptimum =
+			temperatureToAlleleOptimum(climateMatrix[finalObservedRow, pop]);
+		
+		catn("p" + pop +
+			" | Historical mean temperature: " +
+			historicalMeanClimate[pop] +
+			" | Historical allele optimum: " +
+			historicalOptimum +
+			" | Final temperature: " +
+			climateMatrix[finalObservedRow, pop] +
+			" | Final allele optimum: " +
+			finalOptimum + ".");
+	}
 	
 	// Genetics
 	initializeMutationRate(1e-7);
 	initializeRecombinationRate(1e-8);
-	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
-	initializeMutationType("m2", 0.5, "f", 0.0); // climate phenotype mutations
-	m2.convertToSubstitution = F; //mutations that fix will not be replaced 
-	m2.color = "red"; // will be displayed in red in the output
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeMutationType("m2", 0.5, "f", 0.0);
+	m2.convertToSubstitution = F;
+	m2.color = "red";
 	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
 	initializeGenomicElement(g1, 0, 99999);
 }
@@ -87,9 +126,7 @@ reproduction()
 1 early()
 {
 	for (pop in 0:(numPops - 1))
-	{
 		sim.addSubpop("p" + pop, K);
-	}
 }
 
 
@@ -116,25 +153,22 @@ reproduction()
 		if (sourceSubpop.individualCount == 0)
 			next;
 		
-		// Get the migration rates leaving this population
 		migrationRates = drop(migrationMatrix[sourcePop,]);
 		migrationRates[sourcePop] = 0.0;
 		totalMigrationRate = sum(migrationRates);
 		
 		if (totalMigrationRate > 1.0)
-			stop("Migration rates leaving a population cannot sum above 1.");
+			stop("Migration rate above 1.");
 		
 		if (totalMigrationRate == 0.0)
 			next;
 		
-		// Choose how many individuals migrate
 		numMigrants = rbinom(1, sourceSubpop.individualCount,
 			totalMigrationRate);
 		
 		if (numMigrants == 0)
 			next;
 		
-		// Choose the migrants and their destinations
 		popMigrants = sample(sourceSubpop.individuals, numMigrants);
 		popDestinations = sample(0:(numPops - 1), numMigrants,
 			replace=T, weights=migrationRates);
@@ -143,7 +177,7 @@ reproduction()
 		allDestinations = c(allDestinations, popDestinations);
 	}
 	
-	// Move the migrants after every migration choice has been made
+	// Move migrants after every migration choice has been made
 	if (size(allMigrants) > 0)
 	{
 		for (destinationPop in 0:(numPops - 1))
@@ -156,23 +190,26 @@ reproduction()
 	}
 	
 	
-	///// CURRENT CLIMATE
-	// Phase 1: ticks 1-1999 gradually approach each historical mean
+	///// CURRENT TEMPERATURE AND ALLELE OPTIMUM
+	// Phase 1: gradually introduce selection toward historical optima
 	if (sim.cycle < TlocalAdaptation)
 	{
 		adaptProgress = asFloat(sim.cycle) / TlocalAdaptation;
-		climates = historicalMeanClimate * adaptProgress;
+		temperatures = historicalMeanClimate;
+		alleleOptima =
+			temperatureToAlleleOptimum(temperatures) * adaptProgress;
 		currentYear = "Local Adaptation";
 	}
 	
-	// Phase 2: ticks 2000-3999 remain at each historical mean
+	// Phase 2: remain at each historical mean
 	else if (sim.cycle < TclimateChange)
 	{
-		climates = historicalMeanClimate;
+		temperatures = historicalMeanClimate;
+		alleleOptima = temperatureToAlleleOptimum(temperatures);
 		currentYear = "Historical Mean";
 	}
 	
-	// Phase 3: tick 4000 begins the observed climate record with 1970
+	// Phase 3: follow the observed annual climate record
 	else
 	{
 		climateYearIndex = sim.cycle - TclimateChange;
@@ -180,27 +217,23 @@ reproduction()
 		if (climateYearIndex >= numObservedYears)
 			climateYearIndex = numObservedYears - 1;
 		
-		//observedClimateRows = c(30 (1970), 31, 32, 33...);
 		climateRow = observedClimateRows[climateYearIndex];
-		climates = drop(climateMatrix[climateRow,]);
-		//climates = drop(climateMatrix[30,]); = ex : [30,] p0: 11.0289 , p1: 9.9053
+		temperatures = drop(climateMatrix[climateRow,]);
+		alleleOptima = temperatureToAlleleOptimum(temperatures);
 		currentYear = asString(climateYears[climateRow]);
-		
-		//tick 4000, climateYearIndex 0, calendar year 1970
 	}
 	
 	
 	///// CLIMATE FITNESS
-	for (subpop in sim.subpopulations)
+	inds = sim.subpopulations.individuals;
+	
+	if (size(inds) > 0)
 	{
-		if (subpop.individualCount == 0)
-			next;
-		
-		inds = subpop.individuals;
-		climate = climates[subpop.id];
 		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		popOptima = alleleOptima[inds.subpopulation.id];
 		
-		fitness = 1.0 - (phenotypes - climate)^2 * 0.05;
+		fitness = 1.0 -
+			(phenotypes - popOptima)^2 * selectionStrength;
 		fitness[fitness < 0.0] = 0.0;
 		
 		inds.fitnessScaling = fitness;
@@ -213,11 +246,11 @@ reproduction()
 	{
 		if (subpop.individualCount > 0)
 			subpop.fitnessScaling =
-			min(K / subpop.individualCount, 1.5);
+				min(K / subpop.individualCount, 1.5);
 	}
 	
-	// Save climate values for the output event
-	sim.setValue("currentClimates", climates);
+	sim.setValue("currentTemperatures", temperatures);
+	sim.setValue("currentAlleleOptima", alleleOptima);
 	sim.setValue("currentClimateYear", currentYear);
 }
 
@@ -244,27 +277,37 @@ reproduction()
 		
 		if (outputThisGeneration)
 		{
-			climates = sim.getValue("currentClimates");
+			temperatures = sim.getValue("currentTemperatures");
+			alleleOptima = sim.getValue("currentAlleleOptima");
 			currentYear = sim.getValue("currentClimateYear");
 			
 			for (subpop in sim.subpopulations)
 			{
 				if (subpop.individualCount == 0)
 				{
-					catn("Tick " + sim.cycle + " | Year: " + currentYear +
+					catn("Tick " + sim.cycle +
+						" | Year: " + currentYear +
 						" | p" + subpop.id + " : 0" +
-						" | Current phenotype : NA" +
-						" | Current Temp : " + climates[subpop.id] + " |");
+						" | Current mean phenotype : NA" +
+						" | Current Temp : " +
+						temperatures[subpop.id] +
+						" | Allele optimum : " +
+						alleleOptima[subpop.id] + " |");
 				}
 				else
 				{
 					phenotypes = subpop.individuals.tagF;
-					meanPhenotype = mean(phenotypes);
 					
-					catn("Tick " + sim.cycle + " | Year: " + currentYear +
-						" | p" + subpop.id + " : " + subpop.individualCount +
-						" | Current mean phenotype : " + meanPhenotype +
-						" | Current Temp : " + climates[subpop.id] + " |");
+					catn("Tick " + sim.cycle +
+						" | Year: " + currentYear +
+						" | p" + subpop.id + " : " +
+						subpop.individualCount +
+						" | Current mean phenotype : " +
+						mean(phenotypes) +
+						" | Current Temp : " +
+						temperatures[subpop.id] +
+						" | Allele optimum : " +
+						alleleOptima[subpop.id] + " |");
 				}
 			}
 		}

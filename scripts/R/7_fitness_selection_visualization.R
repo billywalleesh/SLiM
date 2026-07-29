@@ -12,10 +12,10 @@ p0_2025 <- 13.9782
 p1_2025 <- 13.0721
 
 # Calculate fitness around each temperature optimum
-p0_historical_fitness <- 1.0 - (phenotypes - p0_historical)^2 * 0.001
-p1_historical_fitness <- 1.0 - (phenotypes - p1_historical)^2 * 0.001
-p0_2025_fitness <- 1.0 - (phenotypes - p0_2025)^2 * 0.001
-p1_2025_fitness <- 1.0 - (phenotypes - p1_2025)^2 * 0.001
+p0_historical_fitness <- 1.0 - (phenotypes - p0_historical)^2 * 0.05
+p1_historical_fitness <- 1.0 - (phenotypes - p1_historical)^2 * 0.05
+p0_2025_fitness <- 1.0 - (phenotypes - p0_2025)^2 * 0.05
+p1_2025_fitness <- 1.0 - (phenotypes - p1_2025)^2 * 0.05
 
 # Fitness cannot be below zero in the SLiM model
 p0_historical_fitness[p0_historical_fitness < 0.0] <- 0.0

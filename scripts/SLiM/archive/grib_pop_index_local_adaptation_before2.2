@@ -1,7 +1,8 @@
 // Local adaptation to observed Swiss temperatures
 // An individual's phenotype is the number of m2 mutations it carries
 
-initialize(){
+initialize()
+{
 	initializeSLiMModelType("nonWF");
 	
 	// Input files
@@ -30,23 +31,27 @@ initialize(){
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 5000);
-	defineConstant("R", 1.01);
-	defineConstant("selectionStrength", 0.05);
-	defineConstant("TlocalAdaptation", 2000); // historical mean is reached
-	defineConstant("TclimateChange", 4000); // observed climate begins
+	defineConstant("K", 500);
+	defineConstant("R", 2.01);
+	defineConstant("TlocalAdaptation", 2000);
+	defineConstant("TclimateChange", 4000);
 	
 	// Find the historical years and observed climate years
 	historicalRows = which((climateYears >= 1940) & (climateYears <= 1970));
 	observedRows = which(climateYears >= 1970);
 	
 	// Calculate the historical mean temperature for every population
-	historicalMeans = apply(climateMatrix[historicalRows, ],1,"mean(applyValue);");
+	historicalMeans = c();
+	for (pop in 0:(numPops - 1))
+	{
+		popHistoricalMean = mean(climateMatrix[historicalRows, pop]);
+		historicalMeans = c(historicalMeans, popHistoricalMean);
+	}
 	
 	defineConstant("historicalMeanClimate", historicalMeans);
 	defineConstant("observedClimateRows", observedRows);
 	defineConstant("numObservedYears", size(observedRows));
-	defineConstant("Tend", TclimateChange + numObservedYears - 1);
+	defineConstant("Tend", TclimateChange + numObservedYears);
 	
 	for (pop in 0:(numPops - 1))
 		catn("p" + pop + " 1940-1970 mean °C: " + historicalMeanClimate[pop] + ".");
@@ -56,7 +61,7 @@ initialize(){
 	initializeRecombinationRate(1e-8);
 	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
 	initializeMutationType("m2", 0.5, "f", 0.0); // climate phenotype mutations
-	m2.convertToSubstitution = F; //mutations that fix will not be replaced
+	m2.convertToSubstitution = F; //mutations that fix will not be replaced 
 	m2.color = "red"; // will be displayed in red in the output
 	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
 	initializeGenomicElement(g1, 0, 99999);
@@ -64,10 +69,12 @@ initialize(){
 
 
 // Each individual produces a random number of offspring
-reproduction(){
+reproduction()
+{
 	litterSize = rpois(1, R);
 	
-	for (offspring in seqLen(litterSize)){
+	for (offspring in seqLen(litterSize))
+	{
 		mate = subpop.sampleIndividuals(1, exclude=individual);
 		
 		if (mate.size() > 0)
@@ -77,15 +84,18 @@ reproduction(){
 
 
 // Create the starting populations
-1 early(){
-	for (pop in 0:(numPops - 1)){
+1 early()
+{
+	for (pop in 0:(numPops - 1))
+	{
 		sim.addSubpop("p" + pop, K);
 	}
 }
 
 
 // Demography, migration, climate selection and density regulation
-1:Tend early(){
+1:Tend early()
+{
 	///// NON-OVERLAPPING GENERATIONS
 	allIndividuals = sim.subpopulations.individuals;
 	adults = allIndividuals[allIndividuals.age > 0];
@@ -99,7 +109,8 @@ reproduction(){
 	allMigrants = c();
 	allDestinations = c();
 	
-	for (sourcePop in 0:(numPops - 1)){
+	for (sourcePop in 0:(numPops - 1))
+	{
 		sourceSubpop = sim.subpopulations[sourcePop];
 		
 		if (sourceSubpop.individualCount == 0)
@@ -111,7 +122,7 @@ reproduction(){
 		totalMigrationRate = sum(migrationRates);
 		
 		if (totalMigrationRate > 1.0)
-			stop("Migration rate above 1.");
+			stop("Migration rates leaving a population cannot sum above 1.");
 		
 		if (totalMigrationRate == 0.0)
 			next;
@@ -133,8 +144,10 @@ reproduction(){
 	}
 	
 	// Move the migrants after every migration choice has been made
-	if (size(allMigrants) > 0){
-		for (destinationPop in 0:(numPops - 1)){
+	if (size(allMigrants) > 0)
+	{
+		for (destinationPop in 0:(numPops - 1))
+		{
 			migrants = allMigrants[allDestinations == destinationPop];
 			
 			if (size(migrants) > 0)
@@ -144,45 +157,58 @@ reproduction(){
 	
 	
 	///// CURRENT CLIMATE
-	// Phase 1: ticks 1-1999 gradually approach each historical mean
-	if (sim.cycle < TlocalAdaptation){
-		adaptProgress = asFloat(sim.cycle) / TlocalAdaptation;
+	// Phase 1: the ancestral optimum is zero
+	if (sim.cycle <= TlocalAdaptation)
+	{
+		climates = rep(0.0, numPops);
+		currentYear = "Ancestral";
+	}
+	
+	// Phase 2: gradually approach each historical mean temperature
+	else if (sim.cycle <= TclimateChange)
+	{
+		adaptGenerations = sim.cycle - TlocalAdaptation;
+		totalAdaptGenerations = TclimateChange - TlocalAdaptation;
+		adaptProgress = asFloat(adaptGenerations) /
+			totalAdaptGenerations;
+		
 		climates = historicalMeanClimate * adaptProgress;
+		//adaptProgress - tick 2001 = (2001−2000)/2000 = 0.0005
+		//adaptProgress - tick 4000 = (4000−2000)/2000 = 1.00
 		currentYear = "Local Adaptation";
 	}
 	
-	// Phase 2: ticks 2000-3999 remain at each historical mean
-	else if (sim.cycle < TclimateChange){
-		climates = historicalMeanClimate;
-		currentYear = "Historical Mean";
-	}
-	
-	// Phase 3: tick 4000 begins the observed climate record with 1970
-	else{
-		climateYearIndex = sim.cycle - TclimateChange;
+	// Phase 3: use one observed climate year per generation
+	else
+	{	//observedYearIndex = tick - 4001 - 1
+		//observedYearIndex = 0
+		climateYearIndex = sim.cycle - TclimateChange - 1;
 		
 		if (climateYearIndex >= numObservedYears)
 			climateYearIndex = numObservedYears - 1;
-		
+			
 		//observedClimateRows = c(30 (1970), 31, 32, 33...);
 		climateRow = observedClimateRows[climateYearIndex];
+		//climateRow = observedClimateRows[0];
 		climates = drop(climateMatrix[climateRow,]);
 		//climates = drop(climateMatrix[30,]); = ex : [30,] p0: 11.0289 , p1: 9.9053
 		currentYear = asString(climateYears[climateRow]);
 		
-		//tick 4000, climateYearIndex 0, calendar year 1970
+		//tick : 4001, Observed-year index: 0, Calendar year: 1970 
 	}
 	
 	
 	///// CLIMATE FITNESS
-	inds = sim.subpopulations.individuals;
-	
-	if (size(inds) > 0){
-		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
-		popClimates = climates[inds.subpopulation.id];
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount == 0)
+			next;
 		
-		fitness = 1.0 -
-			(phenotypes - popClimates)^2 * selectionStrength;
+		inds = subpop.individuals;
+		climate = climates[subpop.id];
+		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		
+		fitness = 1.0 - (phenotypes - climate)^2 * 0.05;
 		fitness[fitness < 0.0] = 0.0;
 		
 		inds.fitnessScaling = fitness;
@@ -191,10 +217,17 @@ reproduction(){
 	
 	
 	///// DENSITY REGULATION
-	for (subpop in sim.subpopulations){
+	for (subpop in sim.subpopulations)
+	{
 		if (subpop.individualCount > 0)
-			subpop.fitnessScaling =
-			min(K / subpop.individualCount, 1.5);
+		{
+			densityFitness = K / subpop.individualCount;
+			
+			if (densityFitness > 1.0)
+				densityFitness = 1.0;
+			
+			subpop.fitnessScaling = densityFitness;
+		}
 	}
 	
 	// Save climate values for the output event
@@ -204,34 +237,41 @@ reproduction(){
 
 
 // Print results and stop if every population is extinct
-1:Tend late(){
+1:Tend late()
+{
 	totalPopulationSize = sum(sim.subpopulations.individualCount);
 	
-	if (totalPopulationSize == 0){
+	if (totalPopulationSize == 0)
+	{
 		catn("All populations extinct at tick " + sim.cycle + ".");
 		sim.simulationFinished();
 	}
-	else{
+	else
+	{
 		outputThisGeneration = F;
 		
 		if (sim.cycle % 100 == 0)
 			outputThisGeneration = T;
 		
-		if (sim.cycle >= TclimateChange)
+		if (sim.cycle > TclimateChange)
 			outputThisGeneration = T;
 		
-		if (outputThisGeneration){
+		if (outputThisGeneration)
+		{
 			climates = sim.getValue("currentClimates");
 			currentYear = sim.getValue("currentClimateYear");
 			
-			for (subpop in sim.subpopulations){
-				if (subpop.individualCount == 0){
+			for (subpop in sim.subpopulations)
+			{
+				if (subpop.individualCount == 0)
+				{
 					catn("Tick " + sim.cycle + " | Year: " + currentYear +
 						" | p" + subpop.id + " : 0" +
 						" | Current phenotype : NA" +
 						" | Current Temp : " + climates[subpop.id] + " |");
 				}
-				else{
+				else
+				{
 					phenotypes = subpop.individuals.tagF;
 					meanPhenotype = mean(phenotypes);
 					
@@ -247,6 +287,7 @@ reproduction(){
 
 
 // Finish after the final observed climate year
-Tend late(){
+Tend late()
+{
 	sim.simulationFinished();
 }
