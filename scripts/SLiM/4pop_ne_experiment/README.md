@@ -18,11 +18,15 @@ and output:
 The 12 treatments form a complete factorial design:
 
 - carrying capacity from tick 1: `500`, `2000`, `5000`;
-- total emigration probability per source deme: weak `0.001`, strong `0.010`;
+- total emigration probability per source deme: weak `0.0001`, strong `0.020`;
 - climate-selection strength: `0.050`, `0.075`.
 
-Migration is distance-weighted, but every row of a treatment matrix has the
-same fixed total. Thus, adding destinations does not increase total emigration.
+Migration is deliberately not distance-weighted in this simplified
+experiment. Conditional on migrating, an individual has an equal probability
+of entering each of the other three demes. Every matrix row has the same fixed
+total, so adding destinations does not increase total emigration. The strong
+treatment has 200 times the per-generation migration probability of the weak
+treatment.
 
 The shared temperature-to-allele calibration is held constant:
 

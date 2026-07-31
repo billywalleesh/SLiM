@@ -158,12 +158,11 @@ initialize()
 		treatmentID + "_seed_" + runSeed + ".csv");
 	
 	// Read and validate inputs.
-	migrationInput =
-		readCSV(migrationFile, colNames=F).asMatrix();
-	climateInput =
-		readCSV(climateFile, colNames=F).asMatrix();
-	yearInput = asInteger(drop(
-		readCSV(yearFile, colNames=F).asMatrix()));
+	migrationInput =readCSV(migrationFile, colNames=F).asMatrix();
+	print(migrationInput);
+	climateInput =readCSV(climateFile, colNames=F).asMatrix();
+	print(climateInput);
+	yearInput = asInteger(drop(readCSV(yearFile, colNames=F).asMatrix()));
 	
 	defineConstant("numPops", nrow(migrationInput));
 	

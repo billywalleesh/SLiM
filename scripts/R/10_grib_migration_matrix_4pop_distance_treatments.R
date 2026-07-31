@@ -1,361 +1,195 @@
-### Make weak and strong distance-weighted migration matrices for four demes.
+### Make simple symmetric migration matrices for four populations
 ###
-### Rows are sources and columns are destinations. Diagonal entries are zero.
-### Every weak row sums to 0.001 and every strong row sums to 0.010.
-### Distance controls how each source's fixed total emigration is divided
-### among the other three demes.
+### Rows are source populations and columns are destination populations.
+### All off-diagonal values are equal, so migration is symmetric.
+### Diagonal values are zero because a population does not migrate to itself.
+
+### 1. File paths
 
 workspace <- Sys.getenv(
-	"MSC_WORKSPACE",
-	unset = "C:/Users/WilliamWallisch/msc_workspace"
+  "MSC_WORKSPACE",
+  unset = "C:/Users/WilliamWallisch/msc_workspace"
 )
+workspace
+
 input_directory <- file.path(
-	workspace,
-	"SLiM/input/grib_pop_index_local_adaptation"
+  workspace,
+  "SLiM/input/grib_pop_index_local_adaptation"
 )
+input_directory
 
-population_file <- file.path(
-	input_directory,
-	"population_locations/grib_population_locations_4pop_swiss_plateau.csv"
-)
-weak_migration_file <- file.path(
-	input_directory,
-	"migration_matrix/grib_migration_matrix_4pop_weak.csv"
-)
-strong_migration_file <- file.path(
-	input_directory,
-	"migration_matrix/grib_migration_matrix_4pop_strong.csv"
-)
-details_metadata_file <- file.path(
-	input_directory,
-	"metadata/grib_migration_matrix_4pop_distance_details_metadata.csv"
-)
-summary_metadata_file <- file.path(
-	input_directory,
-	"metadata/grib_migration_matrix_4pop_distance_summary_metadata.csv"
-)
+population_file <- file.path(input_directory, "population_locations/grib_population_locations_4pop_swiss_plateau.csv")
+weak_migration_file <- file.path(input_directory, "migration_matrix/grib_migration_matrix_4pop_weak.csv")
+strong_migration_file <- file.path(input_directory, "migration_matrix/grib_migration_matrix_4pop_strong.csv")
+details_metadata_file <- file.path(input_directory, "metadata/grib_migration_matrix_4pop_distance_details_metadata.csv")
+summary_metadata_file <- file.path(input_directory, "metadata/grib_migration_matrix_4pop_distance_summary_metadata.csv")
 
-total_emigration_rates <- c(
-	weak = 0.001,
-	strong = 0.010
-)
-migration_distance_scale_km <- 75
-output_decimal_places <- 12L
+### 2. Migration settings
 
-degrees_to_radians <- function(degrees)
-{
-	degrees * pi / 180
-}
+### Weak migration: m = 0.0001 (0.01%)
+### Expected migrants: 0.05 at K = 500, 0.2 at K = 2000,
+### and 0.5 at K = 5000
 
-haversine_distance_km <- function(lon1, lat1, lon2, lat2)
-{
-	earth_radius_km <- 6371
+weak_total_migration <- 0.0001
+weak_total_migration
 
-	lon1 <- degrees_to_radians(lon1)
-	lat1 <- degrees_to_radians(lat1)
-	lon2 <- degrees_to_radians(lon2)
-	lat2 <- degrees_to_radians(lat2)
+### Strong migration: m = 0.02 (2%)
+### Expected migrants: 10 at K = 500, 40 at K = 2000,
+### and 100 at K = 5000
 
-	d_lon <- lon2 - lon1
-	d_lat <- lat2 - lat1
+strong_total_migration <- 0.02
+strong_total_migration
 
-	a <- sin(d_lat / 2)^2 +
-		cos(lat1) * cos(lat2) * sin(d_lon / 2)^2
-	c <- 2 * atan2(sqrt(a), sqrt(1 - a))
+number_of_populations <- 4
+number_of_populations
 
-	earth_radius_km * c
-}
+### Each population can migrate to the other three populations
 
-### Allocate integer units of 10^-12 so the decimal values written in every
-### row sum exactly to the requested treatment total.
-allocate_exact_rates <- function(weights, total_rate, decimal_places)
-{
-	scale <- 10^decimal_places
-	total_units <- round(total_rate * scale)
-	raw_units <- weights / sum(weights) * total_units
-	rate_units <- floor(raw_units)
-	unallocated_units <- total_units - sum(rate_units)
+number_of_destinations <- number_of_populations - 1
+number_of_destinations
 
-	if (unallocated_units > 0)
-	{
-		fractional_parts <- raw_units - rate_units
-		recipient_order <- order(
-			fractional_parts,
-			decreasing = TRUE
-		)
-		recipients <- recipient_order[
-			seq_len(unallocated_units)
-		]
-		rate_units[recipients] <-
-			rate_units[recipients] + 1
-	}
+weak_pairwise_migration <- weak_total_migration / number_of_destinations
+weak_pairwise_migration
 
-	if (sum(rate_units) != total_units)
-		stop("Exact-rate allocation failed.")
+strong_pairwise_migration <- strong_total_migration / number_of_destinations
+strong_pairwise_migration
 
-	rate_units / scale
-}
+### 3. Read the population information
 
-make_migration_matrix <- function(
-	distance_matrix_km,
-	total_rate,
-	distance_scale_km,
-	decimal_places
-)
-{
-	number_of_populations <- nrow(distance_matrix_km)
-	migration_matrix <- matrix(
-		0,
-		nrow = number_of_populations,
-		ncol = number_of_populations
-	)
-
-	for (source in seq_len(number_of_populations))
-	{
-		destinations <- setdiff(
-			seq_len(number_of_populations),
-			source
-		)
-		distance_weights <- exp(
-			-distance_matrix_km[source, destinations] /
-				distance_scale_km
-		)
-		migration_matrix[source, destinations] <-
-			allocate_exact_rates(
-				distance_weights,
-				total_rate,
-				decimal_places
-			)
-	}
-
-	migration_matrix
-}
-
-write_migration_matrix <- function(
-	migration_matrix,
-	output_file,
-	decimal_places
-)
-{
-	formatted_matrix <- matrix(
-		formatC(
-			as.vector(migration_matrix),
-			format = "f",
-			digits = decimal_places
-		),
-		nrow = nrow(migration_matrix),
-		ncol = ncol(migration_matrix)
-	)
-
-	write.table(
-		formatted_matrix,
-		file = output_file,
-		sep = ",",
-		quote = FALSE,
-		row.names = FALSE,
-		col.names = FALSE
-	)
-}
-
-populations <- read.csv(
-	population_file,
-	stringsAsFactors = FALSE
-)
-required_columns <- c("pop", "location", "lon", "lat")
-
-if (!all(required_columns %in% names(populations)))
-	stop("Population file needs columns: pop, location, lon, lat.")
+populations <- read.csv(population_file)
+populations
 
 populations <- populations[
-	order(populations$pop),
-	required_columns
+  order(populations$pop),
+  c("pop", "location", "lon", "lat")
 ]
+populations
 
-if (
-	nrow(populations) != 4L ||
-	!identical(as.integer(populations$pop), 0:3)
-)
-	stop("Expected four sequential population IDs: 0, 1, 2, 3.")
+### 4. Make the weak symmetric migration matrix
 
-number_of_populations <- nrow(populations)
-distance_matrix_km <- matrix(
-	0,
-	nrow = number_of_populations,
-	ncol = number_of_populations
+weak_migration_matrix <- matrix(
+  weak_pairwise_migration,
+  nrow = number_of_populations,
+  ncol = number_of_populations
 )
 
-for (source in seq_len(number_of_populations))
-{
-	for (destination in seq_len(number_of_populations))
-	{
-		if (source == destination)
-			next
+diag(weak_migration_matrix) <- 0
 
-		distance_matrix_km[source, destination] <-
-			haversine_distance_km(
-				populations$lon[source],
-				populations$lat[source],
-				populations$lon[destination],
-				populations$lat[destination]
-			)
-	}
-}
+rownames(weak_migration_matrix) <- paste0("p", populations$pop)
+colnames(weak_migration_matrix) <- paste0("p", populations$pop)
 
-migration_matrices <- lapply(
-	total_emigration_rates,
-	function(total_rate)
-		make_migration_matrix(
-			distance_matrix_km,
-			total_rate,
-			migration_distance_scale_km,
-			output_decimal_places
-		)
+weak_migration_matrix
+
+### Each row should sum to 0.0001
+
+rowSums(weak_migration_matrix)
+
+### 5. Make the strong symmetric migration matrix
+
+strong_migration_matrix <- matrix(
+  strong_pairwise_migration,
+  nrow = number_of_populations,
+  ncol = number_of_populations
 )
+
+diag(strong_migration_matrix) <- 0
+
+rownames(strong_migration_matrix) <- paste0("p", populations$pop)
+colnames(strong_migration_matrix) <- paste0("p", populations$pop)
+
+strong_migration_matrix
+
+### Each row should sum to 0.02
+
+rowSums(strong_migration_matrix)
+
+### 6. Create a simple description of the treatments
+
+migration_details <- data.frame(
+  treatment = c("weak", "strong"),
+  migration_model = c("symmetric", "symmetric"),
+  number_of_populations = c(4, 4),
+  destinations_per_population = c(3, 3),
+  pairwise_migration_rate = c(
+    weak_pairwise_migration,
+    strong_pairwise_migration
+  ),
+  total_out_migration_rate = c(
+    weak_total_migration,
+    strong_total_migration
+  )
+)
+migration_details
+
+### 7. Calculate expected migrant numbers for different population sizes
+
+migration_summary <- data.frame(
+  treatment = c("weak", "strong"),
+  total_out_migration_rate = c(
+    weak_total_migration,
+    strong_total_migration
+  ),
+  expected_migrants_at_K500 = c(
+    weak_total_migration * 500,
+    strong_total_migration * 500
+  ),
+  expected_migrants_at_K2000 = c(
+    weak_total_migration * 2000,
+    strong_total_migration * 2000
+  ),
+  expected_migrants_at_K5000 = c(
+    weak_total_migration * 5000,
+    strong_total_migration * 5000
+  )
+)
+migration_summary
+
+### 8. Create the output folders
 
 dir.create(dirname(weak_migration_file), recursive = TRUE, showWarnings = FALSE)
 dir.create(dirname(details_metadata_file), recursive = TRUE, showWarnings = FALSE)
 
-write_migration_matrix(
-	migration_matrices$weak,
-	weak_migration_file,
-	output_decimal_places
-)
-write_migration_matrix(
-	migration_matrices$strong,
-	strong_migration_file,
-	output_decimal_places
-)
+### 9. Save the migration matrices without row or column names
 
-details_metadata <- do.call(
-	rbind,
-	lapply(
-		names(migration_matrices),
-		function(treatment)
-		{
-			migration_matrix <- migration_matrices[[treatment]]
-			do.call(
-				rbind,
-				lapply(
-					seq_len(number_of_populations),
-					function(source)
-					{
-						destinations <- setdiff(
-							seq_len(number_of_populations),
-							source
-						)
-						data.frame(
-							treatment = treatment,
-							total_emigration_rate =
-								unname(total_emigration_rates[treatment]),
-							source_pop = populations$pop[source],
-							source_location =
-								populations$location[source],
-							destination_pop =
-								populations$pop[destinations],
-							destination_location =
-								populations$location[destinations],
-							distance_km = round(
-								distance_matrix_km[
-									source,
-									destinations
-								],
-								3
-							),
-							distance_weight = round(
-								exp(
-									-distance_matrix_km[
-										source,
-										destinations
-									] /
-										migration_distance_scale_km
-								),
-								8
-							),
-							migration_rate =
-								migration_matrix[
-									source,
-									destinations
-								]
-						)
-					}
-				)
-			)
-		}
-	)
+write.table(
+  weak_migration_matrix,
+  weak_migration_file,
+  sep = ",",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
 )
 
-summary_metadata <- do.call(
-	rbind,
-	lapply(
-		names(migration_matrices),
-		function(treatment)
-		{
-			row_totals <- rowSums(migration_matrices[[treatment]])
-			data.frame(
-				treatment = treatment,
-				total_emigration_rate_target =
-					unname(total_emigration_rates[treatment]),
-				pop = populations$pop,
-				location = populations$location,
-				migration_distance_scale_km =
-					migration_distance_scale_km,
-				total_out_migration_rate = row_totals,
-				expected_migrants_at_K500 =
-					row_totals * 500,
-				expected_migrants_at_K2000 =
-					row_totals * 2000,
-				expected_migrants_at_K5000 =
-					row_totals * 5000
-			)
-		}
-	)
+write.table(
+  strong_migration_matrix,
+  strong_migration_file,
+  sep = ",",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
 )
 
-write.csv(
-	details_metadata,
-	details_metadata_file,
-	row.names = FALSE
-)
-write.csv(
-	summary_metadata,
-	summary_metadata_file,
-	row.names = FALSE
-)
+### Save the readable metadata tables
 
-written_matrices <- list(
-	weak = as.matrix(read.csv(
-		weak_migration_file,
-		header = FALSE
-	)),
-	strong = as.matrix(read.csv(
-		strong_migration_file,
-		header = FALSE
-	))
-)
+write.csv(migration_details, details_metadata_file, row.names = FALSE)
+write.csv(migration_summary, summary_metadata_file, row.names = FALSE)
 
-for (treatment in names(written_matrices))
-{
-	written_matrix <- written_matrices[[treatment]]
-	target <- unname(total_emigration_rates[treatment])
+### 10. Read the matrices back in and display them
 
-	if (!identical(dim(written_matrix), c(4L, 4L)))
-		stop(treatment, " migration matrix is not 4 x 4.")
+written_weak_matrix <- as.matrix(read.csv(
+  weak_migration_file,
+  header = FALSE
+))
+written_weak_matrix
 
-	if (any(diag(written_matrix) != 0))
-		stop(treatment, " migration matrix has a nonzero diagonal.")
+written_strong_matrix <- as.matrix(read.csv(
+  strong_migration_file,
+  header = FALSE
+))
+written_strong_matrix
 
-	if (any(abs(rowSums(written_matrix) - target) > 1e-15))
-		stop(
-			treatment,
-			" migration rows do not sum to ",
-			target,
-			"."
-		)
-}
+### Final checks
 
-message("Wrote weak migration matrix: ", weak_migration_file)
-message("Wrote strong migration matrix: ", strong_migration_file)
-message("Wrote migration details: ", details_metadata_file)
-message("Wrote migration summary: ", summary_metadata_file)
-print(migration_matrices)
-print(summary_metadata)
+rowSums(written_weak_matrix)
+rowSums(written_strong_matrix)
+

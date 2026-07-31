@@ -1,228 +1,183 @@
-### Extract annual mean temperature for four Swiss Plateau populations.
-###
-### Populations:
-###   p0 Geneva, p1 Bern, p2 Zurich, p3 St_Gallen
-###
-### Outputs for SLiM:
-###   grib_climate_matrix_4pop_degrees_c_1940_2025.csv
-###     rows    = years 1940-2025
-###     columns = p0, p1, p2, p3
-###     values  = annual mean temperature in degrees Celsius
-###
-###   grib_climate_years_4pop_1940_2025.csv
-###     one year per row, aligned with the climate matrix
+### Annual mean temperature for four Swiss Plateau populations
+### p0 = Geneva, p1 = Bern, p2 = Zurich, p3 = St_Gallen
 
 library(terra)
 
-workspace <- Sys.getenv(
-	"MSC_WORKSPACE",
-	unset = "C:/Users/WilliamWallisch/msc_workspace"
-)
-input_directory <- file.path(
-	workspace,
-	"SLiM/input/grib_pop_index_local_adaptation"
-)
+### 1. File paths
 
-grib_file <- file.path(
-	workspace,
-	"SLiM/data/raw/2m_temp_1940-2026.grib"
-)
-population_file <- file.path(
-	input_directory,
-	"population_locations/grib_population_locations_4pop_swiss_plateau.csv"
-)
+workspace <- Sys.getenv("MSC_WORKSPACE",unset = "C:/Users/WilliamWallisch/msc_workspace")
+workspace
 
-climate_matrix_file <- file.path(
-	input_directory,
-	"climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv"
-)
-climate_years_file <- file.path(
-	input_directory,
-	"climate_matrix/grib_climate_years_4pop_1940_2025.csv"
-)
-metadata_file <- file.path(
-	input_directory,
-	"metadata/grib_climate_matrix_4pop_degrees_c_1940_2025_metadata.csv"
-)
-baseline_file <- file.path(
-	input_directory,
-	"metadata/grib_climate_matrix_4pop_degrees_c_1940_2025_baseline_metadata.csv"
-)
+input_directory <- file.path(workspace,"SLiM/input/grib_pop_index_local_adaptation")
+input_directory
 
-first_climate_year <- 1940L
-last_climate_year <- 2025L
-baseline_start_year <- 1940L
-baseline_end_year <- 1970L
-requested_years <- first_climate_year:last_climate_year
+grib_file <- file.path(workspace, "SLiM/data/raw/2m_temp_1940-2026.grib")
+population_file <- file.path(input_directory, "population_locations/grib_population_locations_4pop_swiss_plateau.csv")
+climate_matrix_file <- file.path(input_directory, "climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv")
+climate_years_file <- file.path(input_directory, "climate_matrix/grib_climate_years_4pop_1940_2025.csv")
+metadata_file <- file.path(input_directory, "metadata/grib_climate_matrix_4pop_degrees_c_1940_2025_metadata.csv")
+baseline_file <- file.path(input_directory, "metadata/grib_climate_matrix_4pop_degrees_c_1940_2025_baseline_metadata.csv")
 
-if (!file.exists(grib_file))
-	stop("GRIB file not found: ", grib_file)
+### 2. Years used in the analysis
 
-population_locations <- read.csv(
-	population_file,
-	stringsAsFactors = FALSE
-)
+climate_years <- 1940:2025
+climate_years
 
-required_columns <- c("pop", "location", "lon", "lat")
-if (!all(required_columns %in% names(population_locations)))
-	stop("Population file needs columns: pop, location, lon, lat.")
+baseline_start_year <- 1940
+baseline_end_year <- 1970
+
+### 3. Read the population locations
+
+population_locations <- read.csv(population_file)
+population_locations
 
 population_locations <- population_locations[
-	order(population_locations$pop),
-	required_columns
+  order(population_locations$pop),
+  c("pop", "location", "lon", "lat")
 ]
+population_locations
 
-if (nrow(population_locations) != 4L)
-	stop("Expected exactly four population locations.")
-
-if (!identical(
-	as.integer(population_locations$pop),
-	0:3
-))
-	stop("Population IDs must be sequential integers 0, 1, 2, 3.")
-
-expected_locations <- c("Geneva", "Bern", "Zurich", "St_Gallen")
-if (!identical(
-	as.character(population_locations$location),
-	expected_locations
-))
-	stop(
-		"Locations must be ordered: ",
-		paste(expected_locations, collapse = ", "),
-		"."
-	)
+### 4. Read the temperature maps
 
 temperature_maps <- rast(grib_file)
-climate_dates <- as.Date(time(temperature_maps))
+temperature_maps
 
-if (length(climate_dates) == 0L || all(is.na(climate_dates)))
-	stop("No dates were found in terra::time(temperature_maps).")
+climate_dates <- as.Date(time(temperature_maps))
+climate_dates
 
 years_by_layer <- as.integer(format(climate_dates, "%Y"))
-available_years <- sort(unique(years_by_layer))
-missing_years <- setdiff(requested_years, available_years)
+years_by_layer
 
-if (length(missing_years) > 0L)
-	stop(
-		"GRIB file is missing requested years: ",
-		paste(missing_years, collapse = ", "),
-		"."
-	)
+### Show whether any required years are missing
+
+available_years <- sort(unique(years_by_layer))
+available_years
+
+missing_years <- setdiff(climate_years, available_years)
+missing_years
+
+### 5. Turn the population coordinates into spatial points
 
 population_points <- vect(
-	population_locations,
-	geom = c("lon", "lat"),
-	crs = "EPSG:4326"
+  population_locations,
+  geom = c("lon", "lat"),
+  crs = "EPSG:4326"
 )
+population_points
 
-raster_crs <- crs(temperature_maps)
-if (!is.na(raster_crs) && nzchar(raster_crs))
-	population_points <- project(population_points, raster_crs)
+### 6. Extract the temperature at each population
 
-temperature_by_population <- extract(
-	temperature_maps,
-	population_points
-)
-temperature_by_population <- as.matrix(
-	temperature_by_population[, -1, drop = FALSE]
-)
+temperature_by_population <- extract(temperature_maps, population_points)
+temperature_by_population
 
-### Convert Kelvin to Celsius only when the extracted values are Kelvin-like.
-if (median(temperature_by_population, na.rm = TRUE) > 100)
-	temperature_by_population <- temperature_by_population - 273.15
+### Remove the ID column and turn the result into a matrix
+
+temperature_by_population <- as.matrix(temperature_by_population[, -1])
+temperature_by_population
+
+### Convert temperature from Kelvin to degrees Celsius
+
+temperature_by_population <- temperature_by_population - 273.15
+temperature_by_population
+
+### 7. Create an empty annual temperature matrix
 
 annual_temperature_c <- matrix(
-	NA_real_,
-	nrow = length(requested_years),
-	ncol = nrow(population_locations),
-	dimnames = list(
-		as.character(requested_years),
-		paste0("p", population_locations$pop)
-	)
+  NA,
+  nrow = length(climate_years),
+  ncol = nrow(population_locations)
 )
+annual_temperature_c
 
-for (year_position in seq_along(requested_years))
-{
-	this_year <- requested_years[year_position]
-	layers_this_year <- years_by_layer == this_year
+rownames(annual_temperature_c) <- climate_years
+colnames(annual_temperature_c) <- paste0("p", population_locations$pop)
+annual_temperature_c
 
-	annual_temperature_c[year_position, ] <- rowMeans(
-		temperature_by_population[
-			,
-			layers_this_year,
-			drop = FALSE
-		],
-		na.rm = TRUE
-	)
+### 8. Calculate the annual mean temperature for each population
+
+for (i in 1:length(climate_years)) {
+  year <- climate_years[i]
+
+  temperatures_this_year <- temperature_by_population[
+    , years_by_layer == year,
+    drop = FALSE
+  ]
+
+  annual_temperature_c[i, ] <- rowMeans(
+    temperatures_this_year,
+    na.rm = TRUE
+  )
 }
 
-if (any(!is.finite(annual_temperature_c)))
-	stop("Annual climate matrix contains non-finite temperatures.")
+annual_temperature_c
 
-baseline_rows <- requested_years >= baseline_start_year &
-	requested_years <= baseline_end_year
+### 9. Calculate the 1940-1970 baseline temperature
+
+baseline_rows <- climate_years >= baseline_start_year &
+  climate_years <= baseline_end_year
+baseline_rows
 
 baseline_temperature_c <- colMeans(
-	annual_temperature_c[baseline_rows, , drop = FALSE]
+  annual_temperature_c[baseline_rows, , drop = FALSE],
+  na.rm = TRUE
 )
+baseline_temperature_c
+
+### 10. Create the output folders
 
 dir.create(dirname(climate_matrix_file), recursive = TRUE, showWarnings = FALSE)
 dir.create(dirname(metadata_file), recursive = TRUE, showWarnings = FALSE)
 
+### 11. Save the files used by SLiM
+
 write.table(
-	round(annual_temperature_c, 4),
-	file = climate_matrix_file,
-	sep = ",",
-	row.names = FALSE,
-	col.names = FALSE
+  round(annual_temperature_c, 4),
+  climate_matrix_file,
+  sep = ",",
+  row.names = FALSE,
+  col.names = FALSE
 )
 
 write.table(
-	requested_years,
-	file = climate_years_file,
-	sep = ",",
-	row.names = FALSE,
-	col.names = FALSE
+  climate_years,
+  climate_years_file,
+  sep = ",",
+  row.names = FALSE,
+  col.names = FALSE
 )
+
+### 12. Create and save readable metadata files
 
 climate_metadata <- data.frame(
-	year = requested_years,
-	round(annual_temperature_c, 4),
-	check.names = FALSE
+  year = climate_years,
+  round(annual_temperature_c, 4),
+  check.names = FALSE
 )
+climate_metadata
 
 baseline_metadata <- data.frame(
-	pop = population_locations$pop,
-	location = population_locations$location,
-	lon = population_locations$lon,
-	lat = population_locations$lat,
-	baseline_start_year = baseline_start_year,
-	baseline_end_year = baseline_end_year,
-	baseline_temp_c = round(baseline_temperature_c, 4)
+  pop = population_locations$pop,
+  location = population_locations$location,
+  lon = population_locations$lon,
+  lat = population_locations$lat,
+  baseline_start_year = baseline_start_year,
+  baseline_end_year = baseline_end_year,
+  baseline_temp_c = round(baseline_temperature_c, 4)
 )
+baseline_metadata
 
 write.csv(climate_metadata, metadata_file, row.names = FALSE)
 write.csv(baseline_metadata, baseline_file, row.names = FALSE)
 
-written_climate <- as.matrix(read.csv(
-	climate_matrix_file,
-	header = FALSE
-))
+### 13. Read the two SLiM files back in to check them
+
+written_climate <- as.matrix(read.csv(climate_matrix_file, header = FALSE))
+written_climate
+
 written_years <- scan(
-	climate_years_file,
-	what = integer(),
-	sep = ",",
-	quiet = TRUE
+  climate_years_file,
+  what = integer(),
+  sep = ",",
+  quiet = TRUE
 )
-
-if (!identical(dim(written_climate), c(length(requested_years), 4L)))
-	stop("Written climate matrix does not have dimensions 86 x 4.")
-
-if (!identical(written_years, requested_years))
-	stop("Written climate years are not exactly 1940:2025.")
-
-message("Wrote climate matrix: ", climate_matrix_file)
-message("Wrote climate years: ", climate_years_file)
-message("Wrote annual metadata: ", metadata_file)
-message("Wrote baseline metadata: ", baseline_file)
-print(baseline_metadata)
+written_years
