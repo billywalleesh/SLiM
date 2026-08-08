@@ -2,8 +2,10 @@
 
 library(dplyr)
 library(ggplot2)
+library(tidyverse)
+library(lme4)
 
-d <- read.csv("C:/Users/WilliamWallisch/msc_workspace/SLiM/results/reps/grib_4pop_ne_ramp_weak_sel050_K500_rep_1_seed_8000001.csv")
+d <- read.csv("C:/Users/WilliamWallisch/msc_workspace/SLiM/results/reps/all_runs.csv", na = c("NA", "NAN"))
 
 #small eda
 head(d)
@@ -24,155 +26,168 @@ table(d$extinct)
 
 table(table(d$tick))
 
-d$pop_id <- factor(d$pop_id)
-d$location <- factor(d$location)
-d$phase <- factor(d$phase)
+d$migration_treatment <- as.factor(d$migration_treatment)
+d$location <- as.factor(d$location)
 
-str(d)
+hist(d$N)
 
-hist(
-  d$N,
-  main = "Distribution of population size",
-  xlab = "Population size"
-)
+dat <- d %>%
+  mutate(
+    run_id = interaction(treatment_id, seed, drop = TRUE),
+    migration_treatment = factor(migration_treatment),
+    selection_strength = factor(selection_strength),
+    K = factor(K),
+    pop_id = factor(pop_id),
+    extinct = extinct == "T"
+  )
 
-boxplot(
-  N ~ location,
-  data = d,
-  main = "Population size by location",
-  xlab = "Location",
-  ylab = "Population size"
-)
+final_dat <- dat %>%
+  filter(year %in% c("2000", "2025")) %>%
+  mutate(
+    run_id = interaction(treatment_id, seed, drop = TRUE),
+    year = as.integer(year)
+  ) %>%
+  select(
+    run_id,
+    pop_id,
+    migration_treatment,
+    selection_strength,
+    K,
+    year,
+    N
+  ) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = N,
+    names_prefix = "N_"
+  ) %>%
+  mutate(
+    change_N = N_2025 - N_2000
+  )
 
-aggregate(
-  N ~ location,
-  data = d,
-  FUN = mean
-)
+log_dat <- final_dat %>%
+  mutate(
+    proportional_change = (N_2025 - N_2000) / N_2000,
+    log_change = log1p(N_2025) - log1p(N_2000)
+  )
 
-aggregate(
-  N ~ location + phase,
-  data = d,
-  FUN = mean
-)
+ggplot(log_dat, aes(x = change_N)) +
+  geom_histogram(bins = 20) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_wrap(~ K, scales = "free_x") +
+  theme_classic()
 
-plot(
-  N ~ tick,
-  data = d,
-  col = pop_id,
-  pch = 16,
-  cex = 0.5,
-  xlab = "Simulation tick",
-  ylab = "Population size",
-  main = "Population size through time"
-)
+ggplot(log_dat, aes(x = factor(K), y = change_N)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Carrying capacity",
+    y = "Change in N"
+  ) +
+  theme_classic()
 
-legend(
-  "topright",
-  legend = levels(d$pop_id),
-  col = 1:length(levels(d$pop_id)),
-  pch = 16,
-  title = "Population"
-)
-
-summary(d$Ne_fecundity_preMigration)
-
-hist(
-  d$Ne_fecundity_preMigration,
-  main = "Distribution of effective population size",
-  xlab = "Fecundity Ne"
-)
+plot_summary <- log_dat %>%
+  group_by(
+    K,
+    migration_treatment,
+    selection_strength,
+    pop_id
+  ) %>%
+  summarise(
+    mean_change = mean(change_N),
+    se_change = sd(change_N) / sqrt(n()),
+    .groups = "drop"
+  )
 
 ggplot(
-  d,
+  plot_summary,
   aes(
-    x = tick,
-    y = Ne_fecundity_preMigration,
-    colour = location
+    x = factor(K),
+    y = mean_change,
+    group = migration_treatment,
+    linetype = migration_treatment
   )
 ) +
   geom_line() +
-  labs(
-    title = "Effective population size through time",
-    x = "Simulation tick",
-    y = "Fecundity Ne",
-    colour = "Population"
+  geom_point() +
+  geom_errorbar(
+    aes(
+      ymin = mean_change - se_change,
+      ymax = mean_change + se_change
+    ),
+    width = 0.1
   ) +
-  theme_bw()
-
-aggregate(
-  Ne_fecundity_preMigration ~ location + phase,
-  data = d,
-  FUN = mean
-)
-
-d$Ne_N_ratio <- d$Ne_fecundity_preMigration / d$N
-d$Ne_N_ratio
-
-summary(d$Ne_N_ratio)
-
-hist(
-  d$Ne_N_ratio,
-  main = "Distribution of Ne/N",
-  xlab = "Ne divided by N"
-)
-
-aggregate(
-  Ne_N_ratio ~ location + phase,
-  data = d,
-  FUN = mean
-)
+  facet_grid(
+    selection_strength ~ pop_id
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Carrying capacity",
+    y = "Mean change in N",
+    linetype = "Migration"
+  ) +
+  theme_classic()
 
 ggplot(
-  d,
+  log_dat,
   aes(
-    x = tick,
-    y = Ne_N_ratio,
-    colour = location
+    x = N_2000,
+    y = change_N,
+    shape = migration_treatment
   )
 ) +
-  geom_line() +
-  geom_hline(
-    yintercept = 1,
-    linetype = "dashed"
-  ) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ pop_id) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
   labs(
-    title = "Effective size relative to population size",
-    x = "Simulation tick",
-    y = "Ne / N",
-    colour = "Population"
+    x = "Population size in 2000",
+    y = "Change in N, 2000–2025"
   ) +
-  theme_bw()
+  theme_classic()
 
-summary(d$phenotype_lag)
-
-hist(
-  d$phenotype_lag,
-  main = "Distribution of phenotype lag",
-  xlab = "Phenotype lag"
+m1 <- lmer(
+  change_N ~
+    migration_treatment * selection_strength * factor(K) +
+    factor(pop_id) +
+    (1 | run_id),
+  data = final_dat
 )
 
-ggplot(
-  d,
-  aes(
-    x = tick,
-    y = phenotype_lag,
-    colour = location
-  )
-) +
-  geom_line() +
-  geom_hline(
-    yintercept = 0,
-    linetype = "dashed"
-  ) +
-  labs(
-    title = "Phenotype lag through time",
-    x = "Simulation tick",
-    y = "Phenotype lag",
-    colour = "Population"
-  ) +
-  theme_bw()
+summary(m1)
 
-d$N
-d$Ne_fecundity_preMigration
-d$phenotype_lag
+
+m2 <- lmer(
+  change_N ~
+    migration_treatment * selection_strength * factor(K) +
+    factor(pop_id) +
+    (1 | run_id),
+  data = log_dat
+)
+
+summary(m2)
+
+m3 <- lm(
+  change_N ~
+    migration_treatment * selection_strength * factor(K) +
+    factor(pop_id),
+  data = log_dat
+)
+
+anova(m3)
+summary(m3)
+
+m4 <- lm(
+  change_N ~
+    migration_treatment *
+    selection_strength *
+    factor(K) *
+    factor(pop_id),
+  data = log_dat
+)
+
+anova(m4)
+summary(m4)
+
+par(mfrow = c(2, 2))
+plot(m4)
