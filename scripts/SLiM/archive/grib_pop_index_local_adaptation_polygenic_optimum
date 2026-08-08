@@ -2,9 +2,26 @@
 // Neutral burn-in, abrupt historical selection, observed climate, then a 2025 hold.
 // Temperature is converted to an optimal phenotype value, built additively from
 // many small-effect m2 mutations (a normal DFE) rather than a simple allele count.
-// Also logs demographic (variance) effective size Ne per population each tick,
-// Ne = 4N / (Vk + 2), where Vk is the variance in realized offspring number
-// among that tick's reproducing adults.
+//
+// Also logs demographic (variance) effective population size per population,
+// using the Crow & Denniston form
+//
+//    Ne = (N * kBar - 2) / (kBar - 1 + Vk / kBar)
+//
+// where N is the number of PARENTS in a cohort, kBar is their mean number of
+// SURVIVING offspring and Vk is the variance of that number. Counting
+// survivors rather than births matters: litter size here is Poisson, so a
+// births-based Vk is pinned near 2.0 no matter what the climate does, and the
+// resulting Ne is just a restatement of census size. Survivors carry the
+// effect of viability selection, which is the part that actually erodes
+// diversity.
+//
+// Because an offspring's survival is only known after selection at the end of
+// its birth tick, Ne is necessarily ONE TICK BEHIND: the value printed at tick
+// T describes the cohort that reproduced at tick T-1. The printed line
+// therefore carries its own parent count ("Ne parents"), so Ne and N on the
+// same line always refer to the same cohort. Do not compare Ne to the census
+// count printed beside it.
 
 function (float) temperatureToAlleleOptimum(float temperatures)
 {
@@ -19,9 +36,13 @@ initialize()
 {
 	initializeSLiMModelType("nonWF");
 
+	// Pedigree tracking is required so that surviving offspring can be
+	// attributed back to their parents in the Ne calculation.
+	initializeSLiMOptions(keepPedigrees=T);
+
 	// Input files
 	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/");
-	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_4pop_strong.csv");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_4pop_decay.csv");
 	defineConstant("climateFile", inputDirectory + "climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv");
 	defineConstant("yearFile", inputDirectory + "climate_matrix/grib_climate_years_4pop_1940_2025.csv");
 
@@ -45,12 +66,12 @@ initialize()
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 5000);
+	defineConstant("K", 500);
 	defineConstant("R", 1.01);
 	defineConstant("selectionStrength", 0.05);
 	defineConstant("TlocalAdaptation", 2000);
 	defineConstant("TclimateChange", 4000);
-	defineConstant("TholdAfterObserved", 2000);
+	defineConstant("TholdAfterObserved", 0);
 
 	// Standard deviation of the per-copy QTL effect size distribution for
 	// the polygenic m2 mutations (mean effect is 0; effects sum additively).
@@ -109,12 +130,31 @@ initialize()
 
 	// Genetics
 	initializeMutationRate(1e-7);
-	initializeRecombinationRate(1e-8);
+
+	// Recombination. The element is 100 kb, so the total map length is
+	// 100000 * rate crossovers per gamete. The oligogenic model used 1e-8,
+	// which is 0.001 crossovers per gamete: effectively a single
+	// non-recombining block. That is harmless when a handful of
+	// interchangeable alleles carry the trait, but a polygenic trait needs
+	// recombination to shuffle its loci, otherwise selection can only choose
+	// between whole haplotypes and most of the additive variance is lost to
+	// interference. 1e-5 gives about one crossover per gamete, i.e. treats
+	// the element as one ordinary chromosome.
+	initializeRecombinationRate(1e-5);
+
 	initializeMutationType("m1", 0.5, "f", 0.0);
 	initializeMutationType("m2", 0.5, "n", 0.0, m2EffectSD);
 	m2.convertToSubstitution = F;
 	m2.color = "red";
-	initializeGenomicElementType("g1", c(m1, m2), c(0.99, 0.01));
+
+	// Mutational target for the trait. At the oligogenic model's 0.01, m2
+	// mutations arrive at 1e-7 * 100000 * 0.01 = 1e-4 per gamete, so theta =
+	// 4*N*mu = 2 and an individual carries only about four m2 copies. A
+	// phenotype summed from four draws of N(0, 0.1) has a standard deviation
+	// near 0.2 and can never reach optima of 2 to 6. At 0.5 the rate is
+	// 5e-3 per gamete, giving an equilibrium additive variance near 1.0,
+	// which is the right scale for the optima this model uses.
+	initializeGenomicElementType("g1", c(m1, m2), c(0.5, 0.5));
 	initializeGenomicElement(g1, 0, 99999);
 }
 
@@ -133,17 +173,12 @@ reproduction()
 {
 	litterSize = rpois(1, R);
 
-	for (i in seqLen(litterSize))
+	for (offspring in seqLen(litterSize))
 	{
 		mate = subpop.sampleIndividuals(1, exclude=individual);
 
 		if (mate.size() > 0)
-		{
-			newOffspring = subpop.addCrossed(individual, mate);
-			newOffspring.tag = 0;
-			individual.tag = individual.tag + 1;
-			mate.tag = mate.tag + 1;
-		}
+			subpop.addCrossed(individual, mate);
 	}
 }
 
@@ -153,9 +188,6 @@ reproduction()
 {
 	for (pop in 0:(numPops - 1))
 		sim.addSubpop("p" + pop, K);
-
-	// Initialize the reproductive-success tag used for the Ne calculation
-	sim.subpopulations.individuals.tag = 0;
 }
 
 
@@ -168,24 +200,82 @@ reproduction()
 
 
 	///// EFFECTIVE POPULATION SIZE (Ne)
-	// Demographic (variance) Ne, from the realized reproductive success
-	// (Vk, in the .tag property) of the adults that just finished
-	// reproducing this tick, computed before they are removed below.
+	// The adults alive here are the offspring of the PREVIOUS cohort that
+	// have survived viability selection. Counting how many of them each
+	// previous-cohort parent produced gives the variance in realized
+	// reproductive success, including everything selection and density
+	// regulation did to the offspring. Ne therefore describes the cohort
+	// that reproduced one tick ago, and is reported with its own parent
+	// count so the two are always comparable.
 	neEstimates = rep(NAN, numPops);
+	neParentCounts = rep(0, numPops);
+	neMeanOffspring = rep(NAN, numPops);
+	neVarOffspring = rep(NAN, numPops);
 
-	for (pop in 0:(numPops - 1))
+	previousParentIDs = sim.getValue("previousParentIDs");
+	previousParentPops = sim.getValue("previousParentPops");
+
+	if (!isNULL(previousParentIDs))
 	{
-		popAdults = adults[adults.subpopulation.id == pop];
-		nAdults = size(popAdults);
-
-		if (nAdults > 1)
+		if ((size(previousParentIDs) > 0) & (size(adults) > 0))
 		{
-			Vk = var(popAdults.tag);
-			neEstimates[pop] = (4 * nAdults) / (Vk + 2);
+			// Each surviving adult names two parents from the previous cohort.
+			childParentIDs = adults.pedigreeParentIDs;
+
+			minParentID = min(previousParentIDs);
+			maxParentID = max(previousParentIDs);
+
+			// Shift IDs down so they can be used as tabulate() bins.
+			shiftedIDs = childParentIDs - minParentID;
+			shiftedIDs = shiftedIDs[(shiftedIDs >= 0) &
+				(shiftedIDs <= (maxParentID - minParentID))];
+
+			offspringPerBin = tabulate(shiftedIDs,
+				maxbin=(maxParentID - minParentID));
+
+			// Surviving offspring produced by each previous-cohort parent.
+			parentOffspring = offspringPerBin[previousParentIDs - minParentID];
+
+			for (pop in 0:(numPops - 1))
+			{
+				popOffspring = asFloat(parentOffspring[previousParentPops == pop]);
+				nParents = size(popOffspring);
+				neParentCounts[pop] = nParents;
+
+				if (nParents > 1)
+				{
+					kBar = mean(popOffspring);
+					Vk = var(popOffspring);
+
+					neMeanOffspring[pop] = kBar;
+					neVarOffspring[pop] = Vk;
+
+					// Crow & Denniston variance effective size. The
+					// denominator can go non-positive when a cohort barely
+					// replaces itself, in which case Ne is undefined rather
+					// than merely large.
+					if (kBar > 0.0)
+					{
+						denominator = kBar - 1 + Vk / kBar;
+
+						if (denominator > 0.0)
+							neEstimates[pop] =
+								(nParents * kBar - 2) / denominator;
+					}
+				}
+			}
 		}
 	}
 
 	sim.setValue("currentNe", neEstimates);
+	sim.setValue("currentNeParents", neParentCounts);
+	sim.setValue("currentNeMeanOffspring", neMeanOffspring);
+	sim.setValue("currentNeVarOffspring", neVarOffspring);
+
+	// Remember this tick's reproducing cohort, and the subpopulation each
+	// member reproduced in, for the next tick's calculation.
+	sim.setValue("previousParentIDs", adults.pedigreeID);
+	sim.setValue("previousParentPops", adults.subpopulation.id);
 
 
 	if (size(adults) > 0)
@@ -347,9 +437,19 @@ reproduction()
 			currentYear = sim.getValue("currentClimateYear");
 			selectionActive = sim.getValue("selectionActive");
 			neEstimates = sim.getValue("currentNe");
+			neParentCounts = sim.getValue("currentNeParents");
+			neMeanOffspring = sim.getValue("currentNeMeanOffspring");
+			neVarOffspring = sim.getValue("currentNeVarOffspring");
 
 			for (subpop in sim.subpopulations)
 			{
+				// Ne and its parent count describe the cohort that
+				// reproduced one tick ago, not the census printed here.
+				neReport = " | Ne : " + neEstimates[subpop.id] +
+					" | Ne parents : " + neParentCounts[subpop.id] +
+					" | Ne kBar : " + neMeanOffspring[subpop.id] +
+					" | Ne Vk : " + neVarOffspring[subpop.id] + " |";
+
 				if (subpop.individualCount == 0)
 				{
 					catn("Tick " + sim.cycle +
@@ -361,7 +461,7 @@ reproduction()
 						temperatures[subpop.id] +
 						" | Allele optimum : " +
 						alleleOptima[subpop.id] +
-						" | Ne : " + neEstimates[subpop.id] + " |");
+						neReport);
 				}
 				else
 				{
@@ -378,7 +478,7 @@ reproduction()
 						temperatures[subpop.id] +
 						" | Allele optimum : " +
 						alleleOptima[subpop.id] +
-						" | Ne : " + neEstimates[subpop.id] + " |");
+						neReport);
 				}
 			}
 		}

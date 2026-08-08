@@ -17,7 +17,7 @@ initialize()
 	
 	// Input files
 	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/");
-	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_4pop_strong.csv");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_4pop_decay.csv");
 	defineConstant("climateFile", inputDirectory + "climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv");
 	defineConstant("yearFile", inputDirectory + "climate_matrix/grib_climate_years_4pop_1940_2025.csv");
 	
@@ -41,7 +41,7 @@ initialize()
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 5000);
+	defineConstant("K", 500);
 	defineConstant("R", 1.01);
 	defineConstant("selectionStrength", 0.05);
 	defineConstant("TlocalAdaptation", 2000);

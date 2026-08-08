@@ -1,0 +1,319 @@
+// Local adaptation to observed Swiss temperatures - polygenic 100-copy model
+// An individual's phenotype is the number of m2 mutations it carries.
+// The warmest observed environment has an optimum of 100 m2 copies.
+// One copy has one-tenth the effect it has in the 10-copy model.
+// This remains an infinite-sites copy-count model, not 100 fixed QTL.
+
+function (float) temperatureToAlleleOptimum(float temperatures)
+{
+	return startAlleleOptimum +
+		(temperatures - startTemperature) *
+		(endAlleleOptimum - startAlleleOptimum) /
+		(endTemperature - startTemperature);
+}
+
+
+initialize(){
+	initializeSLiMModelType("nonWF");
+
+	// Input files
+	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/");
+	defineConstant("migrationFile", inputDirectory + "migration_matrix/grib_migration_matrix_4pop_decay.csv");
+	defineConstant("climateFile", inputDirectory + "climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv");
+	defineConstant("yearFile", inputDirectory + "climate_matrix/grib_climate_years_4pop_1940_2025.csv");
+
+	// Read the migration data
+	migrationTable = readCSV(migrationFile, colNames=F);
+	migrationInput = migrationTable.asMatrix();
+	print(migrationInput);
+
+	// Read the climate data
+	climateTable = readCSV(climateFile, colNames=F);
+	climateInput = climateTable.asMatrix();
+	print(climateInput);
+
+	// Read the climate years
+	yearTable = readCSV(yearFile, colNames=F);
+	yearMatrix = yearTable.asMatrix();
+	yearInput = asInteger(drop(yearMatrix));
+
+	// Main model parameters
+	defineConstant("architectureName", "polygenic_100");
+	defineConstant("numPops", nrow(migrationInput));
+	defineConstant("migrationMatrix", migrationInput);
+	defineConstant("climateMatrix", climateInput);
+	defineConstant("climateYears", yearInput);
+	defineConstant("K", 500);
+	defineConstant("R", 1.01);
+	defineConstant("selectionStrength", 0.05);
+	defineConstant("TlocalAdaptation", 2000);
+	defineConstant("TclimateChange", 4000);
+
+	// Temperature-to-allele scale
+	defineConstant("architectureScale", 10.0);
+	defineConstant("startAlleleOptimum", 2.0 * architectureScale);
+	defineConstant("endAlleleOptimum", 10.0 * architectureScale);
+
+	// Keep the neutral mutation rate the same in both architectures.
+	// The adaptive mutation rate is ten times the oligogenic rate because
+	// ten times as many small-effect copies are needed.
+	defineConstant("neutralMutationRate", 0.99e-7);
+	defineConstant("climateMutationRate", 0.01e-7 * architectureScale);
+	defineConstant("totalMutationRate",
+		neutralMutationRate + climateMutationRate);
+	defineConstant("climateMutationProportion",
+		climateMutationRate / totalMutationRate);
+
+	// Find the historical years and observed climate years
+	historicalRows = which((climateYears >= 1940) & (climateYears <= 1970));
+	observedRows = which(climateYears >= 1970);
+
+	// Calculate the historical mean temperature for every population
+	historicalMeans = apply(climateMatrix[historicalRows, ],1,
+		"mean(applyValue);");
+
+	defineConstant("historicalMeanClimate", historicalMeans);
+	defineConstant("observedClimateRows", observedRows);
+	defineConstant("numObservedYears", size(observedRows));
+	defineConstant("Tend", TclimateChange + numObservedYears - 1);
+
+	// Temperatures of the final observed climate year
+	finalClimateRow = observedRows[size(observedRows) - 1];
+	finalTemperatures = drop(climateInput[finalClimateRow,]);
+
+	// Anchor the scale on the coldest historical baseline and the warmest
+	// temperature anywhere in the observed 1970-2025 record. This guarantees
+	// that no observed environment has an optimum above 100 copies.
+	defineConstant("startTemperature", min(historicalMeans));
+	defineConstant("endTemperature",
+		max(climateInput[observedRows,]));
+	defineConstant("finalClimate", finalTemperatures);
+
+	defineConstant("historicalAlleleOptima",
+		temperatureToAlleleOptimum(historicalMeanClimate));
+	defineConstant("finalAlleleOptima",
+		temperatureToAlleleOptimum(finalClimate));
+
+	catn("Architecture: " + architectureName + ".");
+	catn("Architecture scale: " + architectureScale +
+		" | Climate mutation rate: " + climateMutationRate + ".");
+	catn("Temperature-to-allele scale: " + startTemperature + " C = " +
+		startAlleleOptimum + " copies, " + endTemperature + " C = " +
+		endAlleleOptimum + " copies.");
+
+	for (pop in 0:(numPops - 1))
+		catn("p" + pop +
+			" | Historical mean temperature: " + historicalMeanClimate[pop] +
+			" | Historical allele optimum: " + historicalAlleleOptima[pop] +
+			" | Final temperature: " + finalClimate[pop] +
+			" | Final allele optimum: " + finalAlleleOptima[pop] + ".");
+
+	// Genetics
+	initializeMutationRate(totalMutationRate);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeMutationType("m2", 0.5, "f", 0.0);
+	m2.convertToSubstitution = F;
+	m2.color = "red";
+	initializeGenomicElementType("g1", c(m1, m2),
+		c(1.0 - climateMutationProportion, climateMutationProportion));
+	initializeGenomicElement(g1, 0, 99999);
+}
+
+
+// Each individual produces a random number of offspring
+reproduction(){
+	litterSize = rpois(1, R);
+
+	for (offspring in seqLen(litterSize)){
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+
+		if (mate.size() > 0)
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+
+// Create the starting populations
+1 early(){
+	for (pop in 0:(numPops - 1)){
+		sim.addSubpop("p" + pop, K);
+	}
+}
+
+
+// Demography, migration, climate selection and density regulation
+1:Tend early(){
+	///// NON-OVERLAPPING GENERATIONS
+	allIndividuals = sim.subpopulations.individuals;
+	adults = allIndividuals[allIndividuals.age > 0];
+
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+
+
+	///// MIGRATION
+	allMigrants = c();
+	allDestinations = c();
+
+	for (sourcePop in 0:(numPops - 1)){
+		sourceSubpop = sim.subpopulations[sourcePop];
+
+		if (sourceSubpop.individualCount == 0)
+			next;
+
+		migrationRates = drop(migrationMatrix[sourcePop,]);
+		migrationRates[sourcePop] = 0.0;
+		totalMigrationRate = sum(migrationRates);
+
+		if (totalMigrationRate > 1.0)
+			stop("Migration rate above 1.");
+
+		if (totalMigrationRate == 0.0)
+			next;
+
+		numMigrants = rbinom(1, sourceSubpop.individualCount,
+			totalMigrationRate);
+
+		if (numMigrants == 0)
+			next;
+
+		popMigrants = sample(sourceSubpop.individuals, numMigrants);
+		popDestinations = sample(0:(numPops - 1), numMigrants,
+			replace=T, weights=migrationRates);
+
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations = c(allDestinations, popDestinations);
+	}
+
+	if (size(allMigrants) > 0){
+		for (destinationPop in 0:(numPops - 1)){
+			migrants = allMigrants[allDestinations == destinationPop];
+
+			if (size(migrants) > 0)
+				sim.subpopulations[destinationPop].takeMigrants(migrants);
+		}
+	}
+
+
+	///// CURRENT CLIMATE AND ALLELE OPTIMUM
+	// Phase 1: ticks 1-1999 gradually approach each historical optimum
+	if (sim.cycle < TlocalAdaptation){
+		adaptProgress = asFloat(sim.cycle) / TlocalAdaptation;
+		climates = historicalMeanClimate;
+		alleleOptima = historicalAlleleOptima * adaptProgress;
+		currentYear = "Local Adaptation";
+	}
+
+	// Phase 2: ticks 2000-3999 remain at each historical optimum
+	else if (sim.cycle < TclimateChange){
+		climates = historicalMeanClimate;
+		alleleOptima = historicalAlleleOptima;
+		currentYear = "Historical Mean";
+	}
+
+	// Phase 3: tick 4000 begins the observed climate record with 1970
+	else{
+		climateYearIndex = sim.cycle - TclimateChange;
+
+		if (climateYearIndex >= numObservedYears)
+			climateYearIndex = numObservedYears - 1;
+
+		climateRow = observedClimateRows[climateYearIndex];
+		climates = drop(climateMatrix[climateRow,]);
+		alleleOptima = temperatureToAlleleOptimum(climates);
+		currentYear = asString(climateYears[climateRow]);
+	}
+
+
+	///// CLIMATE FITNESS
+	inds = sim.subpopulations.individuals;
+
+	if (size(inds) > 0){
+		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		popOptima = alleleOptima[inds.subpopulation.id];
+
+		// One polygenic copy has one-tenth the effect of one oligogenic copy.
+		// Dividing by architectureScale puts both models on the same fitness
+		// scale before selection is calculated.
+		scaledMismatch =
+			(phenotypes - popOptima) / architectureScale;
+
+		fitness = 1.0 - scaledMismatch^2 * selectionStrength;
+		fitness[fitness < 0.0] = 0.0;
+
+		inds.fitnessScaling = fitness;
+		inds.tagF = phenotypes;
+	}
+
+
+	///// DENSITY REGULATION
+	for (subpop in sim.subpopulations){
+		if (subpop.individualCount > 0)
+			subpop.fitnessScaling =
+			min(K / subpop.individualCount, 1.5);
+	}
+
+	sim.setValue("currentClimates", climates);
+	sim.setValue("currentAlleleOptima", alleleOptima);
+	sim.setValue("currentClimateYear", currentYear);
+}
+
+
+// Print results and stop if every population is extinct
+1:Tend late(){
+	totalPopulationSize = sum(sim.subpopulations.individualCount);
+
+	if (totalPopulationSize == 0){
+		catn("All populations extinct at tick " + sim.cycle + ".");
+		sim.simulationFinished();
+	}
+	else{
+		outputThisGeneration = F;
+
+		if (sim.cycle % 100 == 0)
+			outputThisGeneration = T;
+
+		if (sim.cycle >= TclimateChange)
+			outputThisGeneration = T;
+
+		if (outputThisGeneration){
+			climates = sim.getValue("currentClimates");
+			alleleOptima = sim.getValue("currentAlleleOptima");
+			currentYear = sim.getValue("currentClimateYear");
+
+			for (subpop in sim.subpopulations){
+				if (subpop.individualCount == 0){
+					catn("Tick " + sim.cycle + " | Year: " + currentYear +
+						" | p" + subpop.id + " : 0" +
+						" | Current phenotype : NA" +
+						" | Scaled phenotype : NA" +
+						" | Allele optimum : " + alleleOptima[subpop.id] +
+						" | Scaled optimum : " +
+						alleleOptima[subpop.id] / architectureScale +
+						" | Current Temp : " + climates[subpop.id] + " |");
+				}
+				else{
+					phenotypes = subpop.individuals.tagF;
+					meanPhenotype = mean(phenotypes);
+
+					catn("Tick " + sim.cycle + " | Year: " + currentYear +
+						" | p" + subpop.id + " : " + subpop.individualCount +
+						" | Current mean phenotype : " + meanPhenotype +
+						" | Scaled mean phenotype : " +
+						meanPhenotype / architectureScale +
+						" | Allele optimum : " + alleleOptima[subpop.id] +
+						" | Scaled optimum : " +
+						alleleOptima[subpop.id] / architectureScale +
+						" | Current Temp : " + climates[subpop.id] + " |");
+				}
+			}
+		}
+	}
+}
+
+
+// Finish after the final observed climate year
+Tend late(){
+	sim.simulationFinished();
+}
