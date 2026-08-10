@@ -55,7 +55,7 @@ initialize(){
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 5000);
+	defineConstant("K", 500);
 	defineConstant("R", 1.01);
 	defineConstant("TlocalAdaptation", 2000); // historical mean is reached
 	defineConstant("TclimateChange", 4000); // observed climate begins
