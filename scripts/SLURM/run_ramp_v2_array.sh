@@ -2,20 +2,23 @@
 set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/wwalli/msc_workspace/SLiM}"
-MODEL="${MODEL:-${PROJECT_ROOT}/scripts/SLiM/grib_pop_index_local_adaptation_ramp_parameterized.slim}"
-GRID="${GRID:-${PROJECT_ROOT}/scripts/SLURM/parameter_grid_ramp_v1.tsv}"
+MODEL="${MODEL:-${PROJECT_ROOT}/scripts/SLiM/grib_ramp_v2_treeseq_parameterized.slim}"
+GRID="${GRID:-${PROJECT_ROOT}/scripts/SLURM/parameter_grid_ramp_v2.tsv}"
 SLIM_BIN="${SLIM_BIN:-/home/wwalli/conda/envs/msc_env/bin/slim}"
-OUTBASE="${OUTBASE:-/scratch/wwalli/TMP/ramp_v1}"
+OUTBASE="${OUTBASE:-/scratch/wwalli/TMP/ramp_v2}"
 TASK_ID="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-}}"
 
 # Tree-sequence recording for true coalescent Ne. Off by default: it costs
 # roughly 40% more wall time and ~1 MB per run, and RECORD_TREES=0 produces
 # results bit-identical to runs made before it existed.
-RECORD_TREES="${RECORD_TREES:-0}"
+RECORD_TREES="${RECORD_TREES:-1}"
 # With RECORD_TREES=1, extract Ne in this same task while the .trees file is
 # still on fast scratch, rather than in a serial pass over 240 files later.
 EXTRACT_NE="${EXTRACT_NE:-1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+# Start of v2's unlinked neutral block. Ne is measured there, free of the
+# linked selection that distorts the selected block.
+NEUTRAL_START="${NEUTRAL_START:-100000}"
 
 if [[ -z "${TASK_ID}" ]]; then
 	echo "Set SLURM_ARRAY_TASK_ID or TASK_ID to a manifest task number." >&2
@@ -118,6 +121,7 @@ if [[ "${RECORD_TREES}" == "1" ]]; then
 		if "${PYTHON_BIN}" \
 			"${PROJECT_ROOT}/scripts/py/ts_ne_batch.py" \
 			"${expected_trees}" --out "${ne_csv}" \
+			--neutral-start "${NEUTRAL_START}" \
 			>> "${console_log}" 2>&1
 		then
 			echo "  ne=${ne_csv}"

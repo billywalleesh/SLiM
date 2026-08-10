@@ -33,7 +33,7 @@ initialize()
 {
 	initializeSLiMModelType("nonWF");
 	initializeTreeSeq();
-
+	
 	// K=500 is the smallest value that reliably persists here. With R=1.01
 	// the population has almost no reproductive excess while density
 	// regulation caps growth at 1.5x, so it behaves like a near-critical
@@ -51,11 +51,11 @@ initialize()
 		defineConstant("REP", 1);
 	if (!exists("PROJECT_ROOT"))
 		defineConstant("PROJECT_ROOT",
-			"C:/Users/WilliamWallisch/msc_workspace/SLiM");
+		"C:/Users/WilliamWallisch/msc_workspace/SLiM");
 	if (!exists("RESULTS_DIR"))
 		defineConstant("RESULTS_DIR", PROJECT_ROOT +
-			"/results/prototype_ts_ne");
-
+		"/results/prototype_ts_ne");
+	
 	// Shortened phase lengths. Scale these up once the pipeline works.
 	// Do not shorten these much further: the ramp rate is what the
 	// population has to track, and a steeper ramp with R = 1.01 (almost no
@@ -65,20 +65,20 @@ initialize()
 		defineConstant("T_LOCAL_ADAPTATION", 1000);
 	if (!exists("T_CLIMATE_CHANGE"))
 		defineConstant("T_CLIMATE_CHANGE", 2000);
-
+	
 	// A 100 kb block at 1e-8 gives 1e-3 crossovers per meiosis, so the whole
 	// block is effectively one non-recombining locus and every Ne estimate
 	// is dominated by a single genealogy. Scaling r up to 1e-6 makes this
 	// small genome behave like a realistically recombining larger one.
 	if (!exists("RECOMBINATION_RATE"))
 		defineConstant("RECOMBINATION_RATE", 1e-6);
-
+	
 	if (!exists("LOG_INTERVAL"))
 		defineConstant("LOG_INTERVAL", 50);
-
+	
 	if (!any(MIGRATION_CODE == c(0, 1)))
 		stop("MIGRATION_CODE must be 0 (weak) or 1 (strong).");
-
+	
 	if (MIGRATION_CODE == 0)
 	{
 		migrationTreatmentValue = "weak";
@@ -91,7 +91,7 @@ initialize()
 		migrationFileName =
 			"grib_migration_matrix_4pop_strong.csv";
 	}
-
+	
 	defineConstant("migrationTreatment", migrationTreatmentValue);
 	defineConstant("selectionStrength",
 		asFloat(SELECTION_STRENGTH));
@@ -99,18 +99,18 @@ initialize()
 	defineConstant("runSeed", getSeed());
 	defineConstant("runID", "proto_ts_ne_" + migrationTreatment +
 		"_K" + K + "_rep_" + replicateID + "_seed_" + runSeed);
-
+	
 	defineConstant("R", 1.01);
 	defineConstant("populationNames",
 		c("Geneva", "Bern", "Zurich", "St_Gallen"));
 	defineConstant("startAlleleOptimum", 2.0);
 	defineConstant("endAlleleOptimum", 6.0);
-
+	
 	// Genome: selected block, then an unlinked neutral block.
 	defineConstant("selectedBlockEnd", 99999);
 	defineConstant("neutralBlockStart", 100000);
 	defineConstant("neutralBlockEnd", 199999);
-
+	
 	// Shrinking K without rescaling starves the population of adaptive
 	// m2 mutations, so it fails to track the optimum and goes extinct for
 	// an entirely artifactual reason. Scaling the mutation rate by
@@ -119,13 +119,13 @@ initialize()
 	// lengths, so it is unaffected by this rescaling.
 	if (!exists("MUTATION_RATE"))
 		defineConstant("MUTATION_RATE", 1e-7 * (500.0 / K));
-
+	
 	// Only m2 is generated, at the rate the 1% selected fraction of the
 	// original model produced. Neutral variation is deliberately NOT
 	// simulated: the genealogy already carries it, and neutral mutations
 	// can be overlaid afterwards with msprime (see scripts/py/ts_overlay.py).
 	defineConstant("selectedMutationRate", MUTATION_RATE * 0.01);
-
+	
 	// Paths.
 	defineConstant("inputDirectory", PROJECT_ROOT +
 		"/input/grib_pop_index_local_adaptation/");
@@ -135,15 +135,15 @@ initialize()
 		"climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv");
 	defineConstant("yearFile", inputDirectory +
 		"climate_matrix/grib_climate_years_4pop_1940_2025.csv");
-
+	
 	if (!fileExists(RESULTS_DIR))
 		createDirectory(RESULTS_DIR);
-
+	
 	defineConstant("treesFile",
 		RESULTS_DIR + "/" + runID + ".trees");
 	defineConstant("censusFile",
 		RESULTS_DIR + "/" + runID + "_census.csv");
-
+	
 	// Inputs.
 	migrationInput =
 		readCSV(migrationFile, colNames=F).asMatrix();
@@ -151,33 +151,33 @@ initialize()
 		readCSV(climateFile, colNames=F).asMatrix();
 	yearInput = asInteger(drop(
 		readCSV(yearFile, colNames=F).asMatrix()));
-
+	
 	defineConstant("numPops", nrow(migrationInput));
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-
+	
 	historicalRows = which((climateYears >= 1940) &
 		(climateYears <= 1970));
 	observedRows = which(climateYears >= 1970);
 	historicalMeans = apply(
 		climateMatrix[historicalRows, ], 1,
 		"mean(applyValue);");
-
+	
 	defineConstant("historicalMeanClimate", historicalMeans);
 	defineConstant("observedClimateRows", observedRows);
 	defineConstant("numObservedYears", size(observedRows));
 	defineConstant("Tend",
 		T_CLIMATE_CHANGE + numObservedYears - 1);
-
+	
 	// The last pre-climate tick: this cohort is the Ne predictor.
 	defineConstant("censusTick", T_CLIMATE_CHANGE - 1);
-
+	
 	finalClimateRow = observedRows[size(observedRows) - 1];
 	finalTemperatures = drop(climateInput[finalClimateRow, ]);
 	defineConstant("startTemperature", min(historicalMeans));
 	defineConstant("endTemperature", max(finalTemperatures));
-
+	
 	// Genetics. Mutations arise only in the selected block; the neutral
 	// block records genealogy alone.
 	initializeMutationRate(
@@ -192,18 +192,18 @@ initialize()
 	initializeGenomicElement(g1, 0, selectedBlockEnd);
 	initializeGenomicElement(g2, neutralBlockStart,
 		neutralBlockEnd);
-
+	
 	// r = 0.5 across the junction makes the two blocks unlinked.
 	initializeRecombinationRate(
 		c(RECOMBINATION_RATE, 0.5, RECOMBINATION_RATE),
 		c(selectedBlockEnd, neutralBlockStart,
-			neutralBlockEnd));
-
+		neutralBlockEnd));
+	
 	writeFile(censusFile,
 		"run_id,tick,phase,pop_id,location,N," +
 		"mean_phenotype,allele_optimum,phenotype_lag," +
 		"mean_climate_fitness", append=F);
-
+	
 	catn("Run: " + runID);
 	catn("  K=" + K + ", mu=" + MUTATION_RATE +
 		" (m2 rate " + selectedMutationRate + ")" +
@@ -219,11 +219,11 @@ initialize()
 reproduction()
 {
 	litterSize = rpois(1, R);
-
+	
 	for (offspring in seqLen(litterSize))
 	{
 		mate = subpop.sampleIndividuals(1, exclude=individual);
-
+		
 		if (mate.size() > 0)
 			subpop.addCrossed(individual, mate);
 	}
@@ -242,57 +242,57 @@ reproduction()
 	///// NON-OVERLAPPING GENERATIONS
 	allIndividuals = sim.subpopulations.individuals;
 	adults = allIndividuals[allIndividuals.age > 0];
-
+	
 	if (size(adults) > 0)
 		sim.killIndividuals(adults);
-
+	
 	///// MIGRATION
 	allMigrants = c();
 	allDestinations = c();
-
+	
 	for (sourcePop in 0:(numPops - 1))
 	{
 		sourceSubpop = sim.subpopulations[sourcePop];
-
+		
 		if (sourceSubpop.individualCount == 0)
 			next;
-
+		
 		migrationRates = drop(migrationMatrix[sourcePop, ]);
 		migrationRates[sourcePop] = 0.0;
 		totalSourceMigrationRate = sum(migrationRates);
-
+		
 		if (totalSourceMigrationRate == 0.0)
 			next;
-
+		
 		numMigrants = rbinom(1,
 			sourceSubpop.individualCount,
 			totalSourceMigrationRate);
-
+		
 		if (numMigrants == 0)
 			next;
-
+		
 		popMigrants =
 			sample(sourceSubpop.individuals, numMigrants);
 		popDestinations = sample(0:(numPops - 1), numMigrants,
 			replace=T, weights=migrationRates);
-
+		
 		allMigrants = c(allMigrants, popMigrants);
 		allDestinations = c(allDestinations, popDestinations);
 	}
-
+	
 	if (size(allMigrants) > 0)
 	{
 		for (destinationPop in 0:(numPops - 1))
 		{
 			migrants =
 				allMigrants[allDestinations == destinationPop];
-
+			
 			if (size(migrants) > 0)
 				sim.subpopulations[destinationPop].
-					takeMigrants(migrants);
+				takeMigrants(migrants);
 		}
 	}
-
+	
 	///// TEMPERATURE AND ALLELE OPTIMUM
 	if (sim.cycle < T_LOCAL_ADAPTATION)
 	{
@@ -320,10 +320,10 @@ reproduction()
 			temperatureToAlleleOptimum(temperatures);
 		currentPhase = "observed_climate";
 	}
-
+	
 	///// CLIMATE FITNESS
 	inds = sim.subpopulations.individuals;
-
+	
 	if (size(inds) > 0)
 	{
 		phenotypes =
@@ -332,28 +332,28 @@ reproduction()
 		climateFitness = 1.0 -
 			(phenotypes - popOptima)^2 * selectionStrength;
 		climateFitness[climateFitness < 0.0] = 0.0;
-
+		
 		inds.fitnessScaling = climateFitness;
 		inds.tagF = phenotypes;
 	}
-
+	
 	for (subpop in sim.subpopulations)
 	{
 		if (subpop.individualCount > 0)
 			subpop.setValue("meanClimateFitness",
-				mean(subpop.individuals.fitnessScaling));
+			mean(subpop.individuals.fitnessScaling));
 		else
 			subpop.setValue("meanClimateFitness", NAN);
 	}
-
+	
 	///// DENSITY REGULATION
 	for (subpop in sim.subpopulations)
 	{
 		if (subpop.individualCount > 0)
 			subpop.fitnessScaling =
-				min(K / subpop.individualCount, 1.5);
+			min(K / subpop.individualCount, 1.5);
 	}
-
+	
 	sim.setValue("currentPhase", currentPhase);
 	sim.setValue("currentAlleleOptima", alleleOptima);
 }
@@ -364,49 +364,49 @@ reproduction()
 	totalPopulationSize =
 		sum(sim.subpopulations.individualCount);
 	currentPhase = sim.getValue("currentPhase");
-
+	
 	// The pre-climate cohort is retained permanently so its genealogy can
 	// be interrogated after the run.
 	if (sim.cycle == censusTick)
 	{
 		inds = sim.subpopulations.individuals;
-
+		
 		if (size(inds) > 0)
 			sim.treeSeqRememberIndividuals(inds, permanent=T);
-
+		
 		catn("Remembered " + size(inds) +
 			" individuals at census tick " + sim.cycle + ".");
 	}
-
+	
 	if ((sim.cycle % LOG_INTERVAL == 0) |
 		(sim.cycle == censusTick) | (sim.cycle == Tend) |
 		(totalPopulationSize == 0))
 	{
 		alleleOptima = sim.getValue("currentAlleleOptima");
-
+		
 		for (subpop in sim.subpopulations)
 		{
 			meanPhenotype = NAN;
 			phenotypeLag = NAN;
-
+			
 			if (subpop.individualCount > 0)
 			{
 				meanPhenotype = mean(subpop.individuals.tagF);
 				phenotypeLag =
 					alleleOptima[subpop.id] - meanPhenotype;
 			}
-
+			
 			writeFile(censusFile,
 				paste(c(runID, sim.cycle, currentPhase,
-					subpop.id, populationNames[subpop.id],
-					subpop.individualCount, meanPhenotype,
-					alleleOptima[subpop.id], phenotypeLag,
-					subpop.getValue("meanClimateFitness")),
-					sep=","),
+				subpop.id, populationNames[subpop.id],
+				subpop.individualCount, meanPhenotype,
+				alleleOptima[subpop.id], phenotypeLag,
+				subpop.getValue("meanClimateFitness")),
+				sep=","),
 				append=T);
 		}
 	}
-
+	
 	if (totalPopulationSize == 0)
 	{
 		catn("All populations extinct at tick " +

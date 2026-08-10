@@ -46,6 +46,19 @@ initialize()
 		defineConstant("RESULTS_DIR", PROJECT_ROOT +
 			"/results/ramp_v1_experiment");
 
+	// Opt-in tree-sequence recording for true (coalescent) Ne. Off by
+	// default: it changes no dynamics and no RNG draws, so a run with
+	// RECORD_TREES=0 is bit-identical to one from before this was added,
+	// but it does cost disk and a little memory.
+	if (!exists("RECORD_TREES"))
+		defineConstant("RECORD_TREES", 0);
+
+	// Tree sequences are far bigger than the CSVs, so they can be sent to
+	// their own directory and deleted independently once Ne has been
+	// extracted from them.
+	if (!exists("TREES_DIR"))
+		defineConstant("TREES_DIR", RESULTS_DIR);
+
 	if ((K < 2) | (K != asInteger(K)))
 		stop("K must be an integer of at least 2.");
 	if (SELECTION_STRENGTH <= 0.0)
@@ -126,6 +139,12 @@ initialize()
 	defineConstant("outputFile", resultsDirectory +
 		treatmentID + "_rep_" + replicateID +
 		"_seed_" + runSeed + ".csv");
+	if (RECORD_TREES & !fileExists(TREES_DIR))
+		createDirectory(TREES_DIR);
+
+	defineConstant("treesFile", TREES_DIR + "/" +
+		treatmentID + "_rep_" + replicateID +
+		"_seed_" + runSeed + ".trees");
 
 	// Read and validate inputs.
 	migrationInput =
@@ -184,7 +203,14 @@ initialize()
 	defineConstant("endTemperature", max(finalTemperatures));
 	defineConstant("finalClimate", finalTemperatures);
 
+	// The cohort whose Ne is the pre-climate predictor: the last tick
+	// before observed climate begins.
+	defineConstant("censusTick", TclimateChange - 1);
+
 	// Genetics.
+	if (RECORD_TREES)
+		initializeTreeSeq();
+
 	initializeMutationRate(mutationRate);
 	initializeRecombinationRate(1e-8);
 	initializeMutationType("m1", 0.5, "f", 0.0);
@@ -475,10 +501,24 @@ reproduction()
 		}
 	}
 
+	// Pin the pre-climate cohort into the tree sequence so its genealogy
+	// can be interrogated after the run.
+	if (RECORD_TREES & (sim.cycle == censusTick))
+	{
+		inds = sim.subpopulations.individuals;
+
+		if (size(inds) > 0)
+			sim.treeSeqRememberIndividuals(inds, permanent=T);
+	}
+
 	if (totalPopulationSize == 0)
 	{
 		catn("All populations extinct at tick " +
 			sim.cycle + ".");
+
+		if (RECORD_TREES)
+			sim.treeSeqOutput(treesFile);
+
 		sim.simulationFinished();
 	}
 }
@@ -486,5 +526,11 @@ reproduction()
 
 Tend late()
 {
+	if (RECORD_TREES)
+	{
+		sim.treeSeqOutput(treesFile);
+		catn("Wrote tree sequence: " + treesFile);
+	}
+
 	sim.simulationFinished();
 }

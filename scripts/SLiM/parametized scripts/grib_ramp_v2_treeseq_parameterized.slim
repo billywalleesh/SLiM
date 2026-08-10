@@ -1,0 +1,578 @@
+// Parameterized local adaptation to observed Swiss temperatures - v2.
+//
+// v2 is v1 with a genome built so that coalescent Ne can actually be
+// measured. Demography, climate, migration, selection and all phase
+// timings are IDENTICAL to
+// grib_pop_index_local_adaptation_ramp_parameterized.slim. Only the genome
+// differs, in three ways:
+//
+// 1. TWO BLOCKS, UNLINKED. A selected block carrying m2, and a neutral
+//    block carrying nothing at all, with r = 0.5 between them. The neutral
+//    block records genealogy uncontaminated by linked selection; comparing
+//    Ne between blocks measures what selection costs.
+//
+// 2. RECOMBINATION RAISED to 1e-6 per bp. v1 used 1e-8 over 100 kb, which
+//    is 1e-3 crossovers per meiosis -- the whole genome behaves as one
+//    non-recombining locus, and a v1 run yields only ~54 distinct trees
+//    versus ~12000 here. Ne read off 54 correlated genealogies is far
+//    noisier. Note this DOES change dynamics slightly: freer recombination
+//    means less interference between selected sites, so v2 adapts a little
+//    more efficiently than v1. v2 is a new experiment, not a re-run.
+//
+// 3. NO NEUTRAL MUTATIONS ARE SIMULATED. The genealogy already carries all
+//    the neutral information, and mutations can be overlaid afterwards with
+//    msprime (see scripts/py/ts_overlay.py). The m2 mutation supply is held
+//    exactly equal to v1's: v1 generated m2 at 1e-7 * 0.01 = 1e-9 per bp,
+//    and so does v2, over a selected block of the same 100 kb.
+//
+// Tree-sequence recording is always on here -- it is the entire point of
+// this model. Outputs default to results/ramp_v2_experiment and treatment
+// IDs are prefixed grib_ramp_v2_, so nothing collides with v1.
+//
+// Treatment values may be supplied at the command line, for example:
+// slim -s 710101 -d K=500 -d SELECTION_STRENGTH=0.05 \
+//      -d MIGRATION_CODE=1 -d REP=1 \
+//      -d "PROJECT_ROOT='/home/wwalli/msc_workspace/SLiM'" \
+//      grib_ramp_v2_treeseq_parameterized.slim
+
+function (float) temperatureToAlleleOptimum(float temperatures)
+{
+	return startAlleleOptimum +
+		(temperatures - startTemperature) *
+		(endAlleleOptimum - startAlleleOptimum) /
+		(endTemperature - startTemperature);
+}
+
+
+initialize()
+{
+	initializeSLiMModelType("nonWF");
+
+	// Command-line treatment parameters, with defaults for SLiMgui and
+	// one-off local runs.
+	if (!exists("K"))
+		defineConstant("K", 500);
+	if (!exists("SELECTION_STRENGTH"))
+		defineConstant("SELECTION_STRENGTH", 0.05);
+	if (!exists("MIGRATION_CODE"))
+		defineConstant("MIGRATION_CODE", 2);
+	if (!exists("REP"))
+		defineConstant("REP", 1);
+	if (!exists("PROJECT_ROOT"))
+		defineConstant("PROJECT_ROOT",
+			"C:/Users/WilliamWallisch/msc_workspace/SLiM");
+	if (!exists("RESULTS_DIR"))
+		defineConstant("RESULTS_DIR", PROJECT_ROOT +
+			"/results/ramp_v2_experiment");
+
+	// Defaults ON in v2 -- the tree sequence is the primary output -- but
+	// stays overridable so the shell runners can pass it explicitly.
+	if (!exists("RECORD_TREES"))
+		defineConstant("RECORD_TREES", 1);
+
+	// Within-block recombination. See the header note: 1e-8 makes the
+	// genome effectively non-recombining and starves Ne of independent
+	// genealogies.
+	if (!exists("RECOMBINATION_RATE"))
+		defineConstant("RECOMBINATION_RATE", 1e-6);
+
+	// Tree sequences are far bigger than the CSVs, so they can be sent to
+	// their own directory and deleted independently once Ne has been
+	// extracted from them.
+	if (!exists("TREES_DIR"))
+		defineConstant("TREES_DIR", RESULTS_DIR);
+
+	if ((K < 2) | (K != asInteger(K)))
+		stop("K must be an integer of at least 2.");
+	if (SELECTION_STRENGTH <= 0.0)
+		stop("SELECTION_STRENGTH must be positive.");
+	if ((REP < 1) | (REP != asInteger(REP)))
+		stop("REP must be a positive integer.");
+	if (!any(MIGRATION_CODE == c(0, 1, 2)))
+		stop("MIGRATION_CODE must be 0 (weak), 1 (strong) or 2 (decay).");
+
+	if (MIGRATION_CODE == 0)
+	{
+		migrationTreatmentValue = "weak";
+		migrationFileName =
+			"grib_migration_matrix_4pop_weak.csv";
+	}
+	else if (MIGRATION_CODE == 1)
+	{
+		migrationTreatmentValue = "strong";
+		migrationFileName =
+			"grib_migration_matrix_4pop_strong.csv";
+	}
+	else
+	{
+		migrationTreatmentValue = "decay";
+		migrationFileName =
+			"grib_migration_matrix_4pop_decay.csv";
+	}
+
+	if (abs(SELECTION_STRENGTH - 0.050) < 1e-12)
+		selectionLabel = "sel050";
+	else if (abs(SELECTION_STRENGTH - 0.075) < 1e-12)
+		selectionLabel = "sel075";
+	else
+		selectionLabel =
+			"sel" + asString(SELECTION_STRENGTH);
+
+	defineConstant("replicateID", asInteger(REP));
+	defineConstant("selectionStrength",
+		asFloat(SELECTION_STRENGTH));
+	defineConstant("migrationTreatment",
+		migrationTreatmentValue);
+	defineConstant("treatmentID",
+		"grib_ramp_v2_" + migrationTreatment +
+		"_" + selectionLabel + "_K" + K);
+
+	// Fixed model structure, unchanged from v1.
+	defineConstant("R", 1.01);
+	defineConstant("TlocalAdaptation", 2000);
+	defineConstant("TclimateChange", 4000);
+	defineConstant("genomeLength", 100000);
+
+	// Two equally sized blocks laid end to end:
+	//   [0, 99999]        selected, m2 only
+	//   [100000, 199999]  neutral, no mutations at all
+	// with r = 0.5 at the junction so they inherit independently.
+	defineConstant("selectedBlockEnd", genomeLength - 1);
+	defineConstant("neutralBlockStart", genomeLength);
+	defineConstant("neutralBlockEnd", 2 * genomeLength - 1);
+	defineConstant("mutationRate", 1e-7);
+	defineConstant("neutralMutationProportion", 0.99);
+	defineConstant("populationNames",
+		c("Geneva", "Bern", "Zurich", "St_Gallen"));
+
+	// Temperature-to-allele scale anchors.
+	defineConstant("startAlleleOptimum", 2.0);
+	defineConstant("endAlleleOptimum", 6.0);
+
+	// Input and output files.
+	defineConstant("workspaceDirectory", PROJECT_ROOT + "/");
+	defineConstant("inputDirectory", workspaceDirectory +
+		"input/grib_pop_index_local_adaptation/");
+	defineConstant("migrationFile", inputDirectory +
+		"migration_matrix/" + migrationFileName);
+	defineConstant("climateFile", inputDirectory +
+		"climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv");
+	defineConstant("yearFile", inputDirectory +
+		"climate_matrix/grib_climate_years_4pop_1940_2025.csv");
+	defineConstant("resultsDirectory", RESULTS_DIR + "/");
+
+	// The shell runners create this, but a bare local run needs it too
+	// because results/ is not tracked.
+	if (!fileExists(RESULTS_DIR))
+		createDirectory(RESULTS_DIR);
+
+	defineConstant("runSeed", getSeed());
+	defineConstant("outputFile", resultsDirectory +
+		treatmentID + "_rep_" + replicateID +
+		"_seed_" + runSeed + ".csv");
+	if (RECORD_TREES & !fileExists(TREES_DIR))
+		createDirectory(TREES_DIR);
+
+	defineConstant("treesFile", TREES_DIR + "/" +
+		treatmentID + "_rep_" + replicateID +
+		"_seed_" + runSeed + ".trees");
+
+	// Read and validate inputs.
+	migrationInput =
+		readCSV(migrationFile, colNames=F).asMatrix();
+	climateInput =
+		readCSV(climateFile, colNames=F).asMatrix();
+	yearInput = asInteger(drop(
+		readCSV(yearFile, colNames=F).asMatrix()));
+
+	defineConstant("numPops", nrow(migrationInput));
+
+	if (numPops != size(populationNames))
+		stop("This experiment requires exactly four demes.");
+
+	if ((ncol(migrationInput) != numPops) |
+		(ncol(climateInput) != numPops))
+		stop("Migration and climate inputs must have four columns.");
+
+	if (nrow(climateInput) != size(yearInput))
+		stop("Climate rows and climate years do not match.");
+
+	// The decay treatment is distance-weighted, so row totals differ
+	// between demes. Only the per-row probability bound is enforced.
+	rowMigrationTotals =
+		apply(migrationInput, 0, "sum(applyValue);");
+
+	if (max(rowMigrationTotals) >= 1.0)
+		stop("Total emigration probability must be below 1.");
+
+	defineConstant("migrationMatrix", migrationInput);
+	defineConstant("climateMatrix", climateInput);
+	defineConstant("climateYears", yearInput);
+	defineConstant("meanTotalMigrationRate",
+		mean(rowMigrationTotals));
+
+	historicalRows = which((climateYears >= 1940) &
+		(climateYears <= 1970));
+	observedRows = which(climateYears >= 1970);
+
+	historicalMeans = apply(
+		climateMatrix[historicalRows, ], 1,
+		"mean(applyValue);");
+
+	defineConstant("historicalMeanClimate", historicalMeans);
+	defineConstant("observedClimateRows", observedRows);
+	defineConstant("numObservedYears", size(observedRows));
+	defineConstant("Tend",
+		TclimateChange + numObservedYears - 1);
+
+	// Anchor the scale on the coldest historical baseline mean and the
+	// warmest temperature of the final observed year.
+	finalClimateRow = observedRows[size(observedRows) - 1];
+	finalTemperatures = drop(climateInput[finalClimateRow, ]);
+
+	defineConstant("startTemperature", min(historicalMeans));
+	defineConstant("endTemperature", max(finalTemperatures));
+	defineConstant("finalClimate", finalTemperatures);
+
+	// The cohort whose Ne is the pre-climate predictor: the last tick
+	// before observed climate begins.
+	defineConstant("censusTick", TclimateChange - 1);
+
+	// Genetics.
+	if (RECORD_TREES)
+		initializeTreeSeq();
+
+	// m2 arises at exactly v1's rate: v1 drew mutations at 1e-7 and made
+	// 1% of them m2, so m2 appeared at 1e-9 per bp per generation. Here
+	// every mutation is m2 and the rate is that same 1e-9, over a selected
+	// block of the same length. The neutral block draws nothing.
+	defineConstant("selectedMutationRate",
+		mutationRate * (1.0 - neutralMutationProportion));
+
+	initializeMutationRate(
+		c(selectedMutationRate, 0.0),
+		c(selectedBlockEnd, neutralBlockEnd));
+	initializeRecombinationRate(
+		c(RECOMBINATION_RATE, 0.5, RECOMBINATION_RATE),
+		c(selectedBlockEnd, neutralBlockStart, neutralBlockEnd));
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeMutationType("m2", 0.5, "f", 0.0);
+	m2.convertToSubstitution = F;
+	m2.color = "red";
+	initializeGenomicElementType("g1", m2, 1.0);
+	initializeGenomicElementType("g2", m1, 1.0);
+	initializeGenomicElement(g1, 0, selectedBlockEnd);
+	initializeGenomicElement(g2, neutralBlockStart, neutralBlockEnd);
+
+	header = paste(c(
+		"treatment_id", "seed", "replicate",
+		"migration_treatment", "mean_total_migration_rate",
+		"selection_strength", "K",
+		"tick", "phase", "year", "pop_id", "location",
+		"N", "temperature", "allele_optimum",
+		"mean_phenotype", "phenotype_sd", "phenotype_lag",
+		"mean_climate_fitness",
+		"migrants_received", "extinct"), sep=",");
+	writeFile(outputFile, header, append=F);
+
+	catn("Treatment: " + treatmentID +
+		" | replicate: " + replicateID +
+		" | K: " + K +
+		" | selection: " + selectionStrength +
+		" | mean total migration: " + meanTotalMigrationRate +
+		" | seed: " + runSeed);
+
+	catn("Temperature-to-allele scale: " + startTemperature +
+		" C = " + startAlleleOptimum + " copies, " +
+		endTemperature + " C = " + endAlleleOptimum + " copies.");
+
+	for (pop in 0:(numPops - 1))
+		catn("p" + pop + " " + populationNames[pop] +
+			" | historical temperature: " +
+			historicalMeanClimate[pop] +
+			" | historical allele optimum: " +
+			temperatureToAlleleOptimum(
+				historicalMeanClimate[pop]) +
+			" | final temperature: " + finalClimate[pop] +
+			" | final allele optimum: " +
+			temperatureToAlleleOptimum(finalClimate[pop]));
+}
+
+
+reproduction()
+{
+	litterSize = rpois(1, R);
+
+	for (offspring in seqLen(litterSize))
+	{
+		mate = subpop.sampleIndividuals(1,
+			exclude=individual);
+
+		if (mate.size() > 0)
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+
+1 early()
+{
+	for (pop in 0:(numPops - 1))
+	{
+		sim.addSubpop("p" + pop, K);
+		sim.subpopulations[pop].setValue("meanClimateFitness",
+			NAN);
+	}
+}
+
+
+1:Tend early()
+{
+	///// NON-OVERLAPPING GENERATIONS
+	allIndividuals = sim.subpopulations.individuals;
+	adults = allIndividuals[allIndividuals.age > 0];
+
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+
+	///// MIGRATION
+	// Every migrant is chosen before anyone moves.
+	allMigrants = c();
+	allDestinations = c();
+	migrantsReceived = integer(numPops);
+
+	for (sourcePop in 0:(numPops - 1))
+	{
+		sourceSubpop = sim.subpopulations[sourcePop];
+
+		if (sourceSubpop.individualCount == 0)
+			next;
+
+		migrationRates =
+			drop(migrationMatrix[sourcePop, ]);
+		migrationRates[sourcePop] = 0.0;
+		totalSourceMigrationRate = sum(migrationRates);
+
+		if (totalSourceMigrationRate == 0.0)
+			next;
+
+		numMigrants = rbinom(1,
+			sourceSubpop.individualCount,
+			totalSourceMigrationRate);
+
+		if (numMigrants == 0)
+			next;
+
+		popMigrants =
+			sample(sourceSubpop.individuals, numMigrants);
+		popDestinations =
+			sample(0:(numPops - 1), numMigrants,
+				replace=T, weights=migrationRates);
+
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations =
+			c(allDestinations, popDestinations);
+	}
+
+	if (size(allMigrants) > 0)
+	{
+		for (destinationPop in 0:(numPops - 1))
+		{
+			migrants =
+				allMigrants[
+					allDestinations == destinationPop];
+
+			if (size(migrants) > 0)
+			{
+				sim.subpopulations[destinationPop].
+					takeMigrants(migrants);
+				migrantsReceived[destinationPop] =
+					size(migrants);
+			}
+		}
+	}
+
+	///// TEMPERATURE AND ALLELE OPTIMUM
+	// Phase 1: ticks 1-1999 ramp toward each historical optimum.
+	if (sim.cycle < TlocalAdaptation)
+	{
+		adaptProgress =
+			asFloat(sim.cycle) / TlocalAdaptation;
+		temperatures = historicalMeanClimate;
+		alleleOptima =
+			temperatureToAlleleOptimum(temperatures) *
+			adaptProgress;
+		currentYear = "Local_Adaptation";
+		currentPhase = "local_adaptation_ramp";
+	}
+
+	// Phase 2: ticks 2000-3999 hold each historical optimum.
+	else if (sim.cycle < TclimateChange)
+	{
+		temperatures = historicalMeanClimate;
+		alleleOptima =
+			temperatureToAlleleOptimum(temperatures);
+		currentYear = "Historical_Mean";
+		currentPhase = "historical_adaptation";
+	}
+
+	// Phase 3: tick 4000 begins the observed climate record with 1970.
+	else
+	{
+		climateYearIndex = sim.cycle - TclimateChange;
+		climateRow =
+			observedClimateRows[climateYearIndex];
+		temperatures =
+			drop(climateMatrix[climateRow, ]);
+		alleleOptima =
+			temperatureToAlleleOptimum(temperatures);
+		currentYear =
+			asString(climateYears[climateRow]);
+		currentPhase = "observed_climate";
+	}
+
+	///// CLIMATE FITNESS
+	inds = sim.subpopulations.individuals;
+
+	if (size(inds) > 0)
+	{
+		phenotypes =
+			asFloat(inds.countOfMutationsOfType(m2));
+		popOptima = alleleOptima[inds.subpopulation.id];
+		climateFitness = 1.0 -
+			(phenotypes - popOptima)^2 * selectionStrength;
+		climateFitness[climateFitness < 0.0] = 0.0;
+
+		inds.fitnessScaling = climateFitness;
+		inds.tagF = phenotypes;
+	}
+
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount > 0)
+			subpop.setValue("meanClimateFitness",
+				mean(subpop.individuals.fitnessScaling));
+		else
+			subpop.setValue("meanClimateFitness", NAN);
+	}
+
+	///// DENSITY REGULATION
+	for (subpop in sim.subpopulations)
+	{
+		if (subpop.individualCount > 0)
+			subpop.fitnessScaling =
+				min(K / subpop.individualCount, 1.5);
+	}
+
+	sim.setValue("currentTemperatures", temperatures);
+	sim.setValue("currentAlleleOptima", alleleOptima);
+	sim.setValue("currentClimateYear", currentYear);
+	sim.setValue("currentPhase", currentPhase);
+	sim.setValue("migrantsReceived", migrantsReceived);
+}
+
+
+1:Tend late()
+{
+	totalPopulationSize =
+		sum(sim.subpopulations.individualCount);
+
+	outputThisGeneration =
+		(sim.cycle % 100 == 0) |
+		(sim.cycle >= TclimateChange) |
+		(totalPopulationSize == 0);
+
+	if (outputThisGeneration)
+	{
+		temperatures =
+			sim.getValue("currentTemperatures");
+		alleleOptima =
+			sim.getValue("currentAlleleOptima");
+		currentYear =
+			sim.getValue("currentClimateYear");
+		currentPhase = sim.getValue("currentPhase");
+		migrantsReceived =
+			sim.getValue("migrantsReceived");
+
+		for (subpop in sim.subpopulations)
+		{
+			pop = subpop.id;
+			extinct = (subpop.individualCount == 0);
+
+			meanPhenotype = NAN;
+			phenotypeSD = NAN;
+			phenotypeLag = NAN;
+
+			if (!extinct)
+			{
+				phenotypes = subpop.individuals.tagF;
+				meanPhenotype = mean(phenotypes);
+
+				if (size(phenotypes) > 1)
+					phenotypeSD = sd(phenotypes);
+
+				phenotypeLag =
+					alleleOptima[pop] - meanPhenotype;
+			}
+
+			values = c(
+				treatmentID,
+				runSeed,
+				replicateID,
+				migrationTreatment,
+				meanTotalMigrationRate,
+				selectionStrength,
+				K,
+				sim.cycle,
+				currentPhase,
+				currentYear,
+				pop,
+				populationNames[pop],
+				subpop.individualCount,
+				temperatures[pop],
+				alleleOptima[pop],
+				meanPhenotype,
+				phenotypeSD,
+				phenotypeLag,
+				subpop.getValue("meanClimateFitness"),
+				migrantsReceived[pop],
+				extinct);
+
+			writeFile(outputFile,
+				paste(values, sep=","),
+				append=T);
+		}
+	}
+
+	// Pin the pre-climate cohort into the tree sequence so its genealogy
+	// can be interrogated after the run.
+	if (RECORD_TREES & (sim.cycle == censusTick))
+	{
+		inds = sim.subpopulations.individuals;
+
+		if (size(inds) > 0)
+			sim.treeSeqRememberIndividuals(inds, permanent=T);
+	}
+
+	if (totalPopulationSize == 0)
+	{
+		catn("All populations extinct at tick " +
+			sim.cycle + ".");
+
+		if (RECORD_TREES)
+			sim.treeSeqOutput(treesFile);
+
+		sim.simulationFinished();
+	}
+}
+
+
+Tend late()
+{
+	if (RECORD_TREES)
+	{
+		sim.treeSeqOutput(treesFile);
+		catn("Wrote tree sequence: " + treesFile);
+	}
+
+	sim.simulationFinished();
+}
