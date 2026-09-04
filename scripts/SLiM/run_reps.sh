@@ -5,7 +5,7 @@ set -euo pipefail
 PROJECT_ROOT_WIN="C:/Users/WilliamWallisch/msc_workspace/SLiM"
 PROJECT_ROOT_MSYS="/c/Users/WilliamWallisch/msc_workspace/SLiM"
 SLIM="C:/msys64/mingw64/bin/slim.exe"
-MODEL="${PROJECT_ROOT_WIN}/scripts/SLiM/grib_4pop_ne_ramp_parameterized.slim"
+MODEL="${PROJECT_ROOT_WIN}/scripts/SLiM/parametized scripts/grib_4pop_ne_ramp_parameterized.slim"
 REPLICATES="${1:-10}"
 
 # SLiM receives the Windows path; Bash uses the MSYS2 path.

@@ -47,7 +47,7 @@ initialize(){
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 500);
+	defineConstant("K", 1000);
 	defineConstant("R", 1.01);
 	defineConstant("selectionStrength", 0.05);
 	defineConstant("TlocalAdaptation", 2000); // historical mean is reached

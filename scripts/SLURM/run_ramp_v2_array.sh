@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/wwalli/msc_workspace/SLiM}"
-MODEL="${MODEL:-${PROJECT_ROOT}/scripts/SLiM/grib_ramp_v2_treeseq_parameterized.slim}"
+MODEL="${MODEL:-${PROJECT_ROOT}/scripts/SLiM/parametized scripts/grib_ramp_v2_treeseq_parameterized.slim}"
 GRID="${GRID:-${PROJECT_ROOT}/scripts/SLURM/parameter_grid_ramp_v2.tsv}"
 SLIM_BIN="${SLIM_BIN:-/home/wwalli/conda/envs/msc_env/bin/slim}"
 OUTBASE="${OUTBASE:-/scratch/wwalli/TMP/ramp_v2}"

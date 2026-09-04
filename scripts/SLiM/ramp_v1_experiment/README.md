@@ -108,14 +108,14 @@ experiment for `Ne` predictors.
 
 ## SLURM array
 
-Submit 20 replicates per treatment with:
+Submit 10 replicates per treatment with:
 
 ```bash
 cd /home/wwalli/msc_workspace/SLiM
-bash scripts/SLURM/submit_ramp_v1_array.sh 20
+bash scripts/SLURM/submit_ramp_v1_array.sh 10
 ```
 
-This submits `12 x 20 = 240` array tasks. Each task runs one independent SLiM
+This submits `12 x 10 = 120` array tasks. Each task runs one independent SLiM
 process. Seeds are deterministic and globally unique across treatments and
 replicates, and use a `6000000` base that keeps them disjoint from the four-deme
 Ne experiment's `5000000` seeds. The exact manifest is retained under:
@@ -128,7 +128,7 @@ Useful submission overrides:
 
 ```bash
 MAX_CONCURRENT=6 TIME_LIMIT=1-00:00:00 MEMORY=8G \
-  bash scripts/SLURM/submit_ramp_v1_array.sh 20
+  bash scripts/SLURM/submit_ramp_v1_array.sh 10
 ```
 
 Each run writes a unique CSV under `/scratch/wwalli/TMP/ramp_v1/csv/`, with
