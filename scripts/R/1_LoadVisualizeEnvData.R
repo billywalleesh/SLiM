@@ -125,3 +125,4 @@ ggplot() + # create a plot
 
 # The plot can be saved using the ggsave function:
 ggsave("topography_map_ggplot.pdf")
+
