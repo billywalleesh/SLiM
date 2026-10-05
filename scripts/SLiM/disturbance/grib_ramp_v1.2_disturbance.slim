@@ -5,22 +5,20 @@
 //
 // WHAT THIS ADDS
 //
-// 1. A one-off disturbance to one or more target demes (TARGET_POP can be a
-//    single number or a vector, e.g. c(0, 1)), DISTURBANCE_LAG ticks before
-//    climate change begins (tick Tdisturb = TclimateChange - DISTURBANCE_LAG):
-//
-//      DISTURBANCE_TYPE 0  none (control; identical dynamics to v1.2)
-//      DISTURBANCE_TYPE 1  reduce  - kill (1 - DISTURBANCE_K_MULT) of the deme
-//                          and multiply its K by DISTURBANCE_K_MULT for good
-//                          (default 0.5 = "cut in half", i.e. habitat loss)
-//      DISTURBANCE_TYPE 2  destroy - kill every individual in the deme
-//
-//    For destroy, RECOLONIZE sets what happens to the habitat:
-//      RECOLONIZE 0  habitat removed: K = 0, the deme is a sink (migrants that
-//                    arrive die). The population is NOT maintained.
-//      RECOLONIZE 1  habitat intact: K unchanged, immigrants can refound it.
-//                    If refounded, it counts as maintained (decided with Billy,
-//                    2026-09-29); its Ne only matters for Ne 500 if it recovers.
+// 1. A one-off disturbance, DISTURBANCE_LAG ticks before climate change
+//    begins (tick Tdisturb = TclimateChange - DISTURBANCE_LAG). What happens
+//    is one row (SCENARIO_ID) of the scenario table SCENARIO_FILE, written by
+//    29_disturbance_experiment_design.R. Each row gives every population:
+//      survive_pX  fraction of its individuals left alive at the disturbance
+//      habitat_pX  fraction of K left afterwards, for good
+//    so, for one population:
+//      untouched          survive 1    habitat 1
+//      halve              survive 0.5  habitat 0.5   (habitat loss)
+//      bottleneck         survive 0.1  habitat 1     (habitat intact, regrows)
+//      destroy, recol.    survive 0    habitat 1     (immigrants can refound it;
+//                                                   counts as maintained if so)
+//      destroy, no recol. survive 0    habitat 0     (K = 0: a sink, migrants die)
+//    Scenario 0 is the control (nothing happens; identical dynamics to v1.2).
 //
 //    Suggested DISTURBANCE_LAG treatments (1 tick = 1 generation):
 //      1     pure demographic effect (habitat lost "right now")
@@ -50,11 +48,13 @@
 //   below N - this measures it) and is noisy (few independent loci).
 //   Migration also inflates frequency change, lowering per-deme temporal Ne.
 //
-// Every constant below can be set from the command line with -d, e.g.
-//   slim -d DISTURBANCE_TYPE=2 -d RECOLONIZE=0 -d TARGET_POP=1 \
-//        -d DISTURBANCE_LAG=500 -s 42 grib_ramp_v1.2_disturbance.slim
-// Several demes at once (all get the same disturbance type, at the same tick):
-//   slim -d "TARGET_POP=c(0,2)" -d DISTURBANCE_TYPE=2 -d RECOLONIZE=0 ...
+// HOW TO RUN
+//   One job of the experiment (reads scenario, K, migration, selection and
+//   seed from row JOB_ID of RUN_GRID_FILE):
+//     slim -d JOB_ID=123 grib_ramp_v1.2_disturbance.slim
+//   Or set things by hand (every constant below can be set with -d):
+//     slim -d SCENARIO_ID=17 -d K=1000 -d SELECTION_STRENGTH=0.05 \
+//          -d DISTURBANCE_LAG=500 -s 42 grib_ramp_v1.2_disturbance.slim
 //
 // Output (long format): RESULTS_DIR/<run label>_log.csv, one row per
 // population per tick (cycle repeats numPops times). The three *_metapop
@@ -310,7 +310,7 @@ function (s$) currentPhase(void)
 	if (sim.cycle >= TclimateChange)
 		return "climate_change";
 
-	if ((DISTURBANCE_TYPE != 0) & (sim.cycle >= Tdisturb))
+	if (isDisturbed & (sim.cycle >= Tdisturb))
 		return "post_disturbance";
 
 	return "historical_hold";
@@ -371,6 +371,30 @@ initialize(){
 	///// RUN CONSTANTS (override with -d)
 	if (!exists("PROJECT_ROOT"))
 		defineConstant("PROJECT_ROOT", "C:/Users/WilliamWallisch/msc_workspace");
+	defineConstant("inputDirectory", PROJECT_ROOT +
+		"/SLiM/input/grib_pop_index_local_adaptation/");
+	if (!exists("SCENARIO_FILE"))
+		defineConstant("SCENARIO_FILE", inputDirectory +
+			"disturbance_experiment/disturbance_scenarios.csv");
+	if (!exists("RUN_GRID_FILE"))
+		defineConstant("RUN_GRID_FILE", inputDirectory +
+			"disturbance_experiment/run_grid.csv");
+
+	// One job of the experiment: take its settings from the run grid
+	if (exists("JOB_ID"))
+	{
+		grid = readCSV(RUN_GRID_FILE);
+		jobRow = which(grid.getValue("job_id") == JOB_ID);
+		if (size(jobRow) != 1)
+			stop("JOB_ID " + JOB_ID + " not found in " + RUN_GRID_FILE);
+		defineConstant("SCENARIO_ID", grid.getValue("scenario_id")[jobRow]);
+		defineConstant("K", grid.getValue("K")[jobRow]);
+		defineConstant("MIGRATION_FILE", grid.getValue("migration_file")[jobRow]);
+		defineConstant("SELECTION_STRENGTH", grid.getValue("selection")[jobRow]);
+		defineConstant("REPLICATE", grid.getValue("rep")[jobRow]);
+		setSeed(grid.getValue("seed")[jobRow]);
+	}
+
 	if (!exists("MIGRATION_FILE"))
 		defineConstant("MIGRATION_FILE", "grib_migration_matrix_4pop_decay.csv"); // v1.2's matrix
 	if (!exists("RESULTS_DIR"))
@@ -386,16 +410,12 @@ initialize(){
 		defineConstant("TclimateChange", 8000);   // observed climate begins
 
 	// Disturbance
-	if (!exists("DISTURBANCE_TYPE"))
-		defineConstant("DISTURBANCE_TYPE", 1);    // 0 none, 1 reduce, 2 destroy
-	if (!exists("TARGET_POP"))
-		defineConstant("TARGET_POP", c(0, 1, 2, 3));          // 0 Geneva, 1 Bern, 2 Zurich, 3 St. Gallen
+	if (!exists("SCENARIO_ID"))
+		defineConstant("SCENARIO_ID", 0);         // row of SCENARIO_FILE; 0 = control
 	if (!exists("DISTURBANCE_LAG"))
 		defineConstant("DISTURBANCE_LAG", 1);     // ticks before climate change
-	if (!exists("DISTURBANCE_K_MULT"))
-		defineConstant("DISTURBANCE_K_MULT", 0.5); // reduce: fraction of K kept
-	if (!exists("RECOLONIZE"))
-		defineConstant("RECOLONIZE", 1);          // destroy: 0 habitat removed, 1 intact
+	if (!exists("REPLICATE"))
+		defineConstant("REPLICATE", 0);           // only used in the file name
 
 	// Temporal Ne
 	if (!exists("TEMPORAL_INTERVAL"))
@@ -408,18 +428,12 @@ initialize(){
 		defineConstant("NE_PROXY_RATIO", 0.1);
 
 	// Checks
-	if (!any(DISTURBANCE_TYPE == c(0, 1, 2)))
-		stop("DISTURBANCE_TYPE must be 0, 1 or 2.");
 	if ((DISTURBANCE_LAG < 1) | (DISTURBANCE_LAG >= TclimateChange - TlocalAdaptation))
 		stop("DISTURBANCE_LAG must be >= 1 and inside the historical hold.");
-	if ((DISTURBANCE_K_MULT < 0.0) | (DISTURBANCE_K_MULT > 1.0))
-		stop("DISTURBANCE_K_MULT must be between 0 and 1.");
 
 	defineConstant("Tdisturb", TclimateChange - DISTURBANCE_LAG);
 
 	///// INPUTS
-	defineConstant("inputDirectory", PROJECT_ROOT +
-		"/SLiM/input/grib_pop_index_local_adaptation/");
 	migrationInput = readCSV(inputDirectory + "migration_matrix/" + MIGRATION_FILE,
 		colNames=F).asMatrix();
 	climateInput = readCSV(inputDirectory +
@@ -440,12 +454,26 @@ initialize(){
 	defineConstant("popNames", (numPops == 4) ?
 		c("Geneva", "Bern", "Zurich", "St_Gallen") else ("p" + (0:(numPops - 1))));
 
-	if (size(TARGET_POP) == 0)
-		stop("TARGET_POP must hold at least one population.");
-	if (any(TARGET_POP < 0) | any(TARGET_POP >= numPops))
-		stop("TARGET_POP out of range: every value must be 0 to " + (numPops - 1) + ".");
-	if (size(unique(TARGET_POP)) != size(TARGET_POP))
-		stop("TARGET_POP lists the same population twice.");
+	///// DISTURBANCE SCENARIO (one row of SCENARIO_FILE)
+	scenarios = readCSV(SCENARIO_FILE);
+	scenRow = which(scenarios.getValue("scenario_id") == SCENARIO_ID);
+	if (size(scenRow) != 1)
+		stop("SCENARIO_ID " + SCENARIO_ID + " not found in " + SCENARIO_FILE);
+	survive = float(numPops);
+	habitat = float(numPops);
+	for (pop in 0:(numPops - 1))
+	{
+		survive[pop] = asFloat(scenarios.getValue("survive_p" + pop)[scenRow]);
+		habitat[pop] = asFloat(scenarios.getValue("habitat_p" + pop)[scenRow]);
+	}
+	if (any(survive < 0.0) | any(survive > 1.0) | any(habitat < 0.0) | any(habitat > 1.0))
+		stop("survive and habitat must be between 0 and 1 (scenario " + SCENARIO_ID + ").");
+	defineConstant("SURVIVE", survive);
+	defineConstant("HABITAT", habitat);
+	popsHit = scenarios.getValue("pops_hit")[scenRow];
+	defineConstant("SCENARIO_LABEL", (popsHit == "none") ? "control" else
+		(scenarios.getValue("severity")[scenRow] + "_" + popsHit));
+	defineConstant("isDisturbed", any(SURVIVE < 1.0) | any(HABITAT < 1.0));
 
 	defineConstant("overallMutationRate", 1e-7);
 	defineConstant("neutralFraction", 0.99);
@@ -471,15 +499,16 @@ initialize(){
 	defineConstant("finalAlleleOptima", temperatureToAlleleOptimum(finalClimate));
 
 	///// OUTPUT FILE
-	typeLabel = c("none", "reduce", "destroy")[DISTURBANCE_TYPE];
-	runLabel = "v1.2dist_" + typeLabel;
-	if (DISTURBANCE_TYPE == 1)
-		runLabel = runLabel + "_kmult" + DISTURBANCE_K_MULT;
-	if (DISTURBANCE_TYPE == 2)
-		runLabel = runLabel + "_recol" + RECOLONIZE;
-	if (DISTURBANCE_TYPE != 0)
-		runLabel = runLabel + "_p" + paste(sort(TARGET_POP), sep="") + "_lag" + DISTURBANCE_LAG;   // e.g. _p01
+	// e.g. v1.2dist_S017_halve_p0+p2_K1000_strong_sel0.05_lag1_rep3_seed123
+	migrationLabel = strsplit(MIGRATION_FILE, "_");
+	migrationLabel = strsplit(migrationLabel[size(migrationLabel) - 1], ".")[0];
+	scenarioNumber = format("%03d", asInteger(SCENARIO_ID));
+	runLabel = "v1.2dist_S" + scenarioNumber + "_" + SCENARIO_LABEL + "_K" + K +
+		"_" + migrationLabel + "_sel" + SELECTION_STRENGTH +
+		"_lag" + DISTURBANCE_LAG + "_rep" + REPLICATE;
 	runLabel = runLabel + "_seed" + getSeed();
+	if (exists("JOB_ID"))
+		runLabel = "job" + format("%04d", asInteger(JOB_ID)) + "_" + runLabel;   // e.g. job0123_v1.2dist_...
 	defineConstant("RUN_LABEL", runLabel);
 	defineConstant("logFilePath", RESULTS_DIR + RUN_LABEL + "_log.csv");
 
@@ -549,36 +578,29 @@ reproduction(){
 
 
 	///// DISTURBANCE (once, at Tdisturb, on the new generation before migration)
-	if ((DISTURBANCE_TYPE != 0) & (sim.cycle == Tdisturb))
+	if (isDisturbed & (sim.cycle == Tdisturb))
 	{
 		Kvec = sim.getValue("Kvec");
 
-		// each target deme is disturbed on its own
-		for (popIndex in TARGET_POP)
+		for (popIndex in 0:(numPops - 1))
 		{
+			if ((SURVIVE[popIndex] == 1.0) & (HABITAT[popIndex] == 1.0))
+				next;
+
 			target = sim.subpopulations[popIndex];
 			before = target.individualCount;
-			numKilled = 0;
 
-			if (DISTURBANCE_TYPE == 1)
-			{
-				numKilled = asInteger(round(before * (1 - DISTURBANCE_K_MULT)));
-				if (numKilled > 0)
-					sim.killIndividuals(sample(target.individuals, numKilled));
-				Kvec[popIndex] = K * DISTURBANCE_K_MULT;
-			}
-			else
-			{
-				numKilled = before;
-				if (before > 0)
-					sim.killIndividuals(target.individuals);
-				if (RECOLONIZE == 0)
-					Kvec[popIndex] = 0.0;
-			}
+			// kill (1 - survive) of the individuals, chosen at random
+			numKilled = asInteger(round(before * (1 - SURVIVE[popIndex])));
+			if (numKilled > 0)
+				sim.killIndividuals(sample(target.individuals, numKilled));
+
+			// habitat left for good (0 = sink)
+			Kvec[popIndex] = K * HABITAT[popIndex];
 
 			// killIndividuals takes effect immediately in nonWF models
 			catn("DISTURBANCE at tick " + sim.cycle + ": p" + popIndex + " (" +
-				popNames[popIndex] + ") " + before + " -> " + (before - numKilled) +
+				popNames[popIndex] + ") " + before + " -> " + target.individualCount +
 				", K now " + Kvec[popIndex] + ".");
 		}
 
