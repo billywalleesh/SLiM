@@ -1,5 +1,10 @@
 # R
 .Rhistory
+.RData
+.RDataTmp*
+
+# R plot outputs (all run folders inside, e.g. 27_ne_inbreeding/, 28_ne_proxy/)
+scripts/R/output/
 
 # Workshop raw materials (large files)
 workshop/original/

@@ -1,0 +1,748 @@
+// Continuous-space local adaptation on the real Swiss temperature landscape
+// v0.1 - built from ramp v1.2 + the disturbance ("cull") module.
+// Design: SLiM/scripts/New Model/CONTINUOUS_MODEL_BRIEF.md
+// Handover / status: SLiM/scripts/New Model/FABLE_HANDOVER.md
+//
+// WHAT IS THE SAME AS v1.2
+//   nonWF, non-overlapping generations (adults die each tick), Poisson
+//   litters with mean R = 1.01, phenotype = m2 copy count, climate fitness
+//   1 - s (phenotype - optimum)^2 floored at 0, the temperature-to-allele
+//   rule (coldest city 1940-1970 mean -> 2 copies, warmest city 2025
+//   temperature -> 6 copies), the density cap of 1.5, the 3 phases and
+//   their timings, the migration matrix rates, the genome and mutation
+//   rates, and every Ne estimator and log column of the cull module.
+//
+// WHAT IS NEW
+//   * One SLiM subpopulation (p1) on a 336 x 190 km map in Swiss LV95 km.
+//   * Temperature is read from ERA5 maps at each individual's position:
+//     one 1940-1970 mean map for phases 1-2 and one map per year for
+//     1970-2025 (built by SLiM/scripts/R/26_continuous_climate_maps.R).
+//   * Habitat = four discs of radius PATCH_RADIUS km around Geneva, Bern,
+//     Zurich and St. Gallen. A population is the set of individuals inside
+//     a disc, recomputed every tick (stored in Individual.tag; -1 = none).
+//   * Local dispersal: offspring start at their first parent's position and
+//     move by a Gaussian step (SIGMA_LOCAL), redrawn until inside their own
+//     disc ("reprising" at the disc edge).
+//   * Long-distance dispersal: with probability = the source population's
+//     row sum in MIGRATION_FILE an offspring jumps; its destination is drawn
+//     with that row's weights and it lands uniformly in the destination disc.
+//     This reproduces the v1.2 migration treatments exactly.
+//   * Mating: mates are drawn by a Gaussian kernel (SIGMA_MATE) around each
+//     parent instead of at random from the whole deme.
+//   * Density regulation: local density from a Gaussian competition kernel
+//     (localPopulationDensity), fitnessScaling *= min(K_local / density,
+//     1.5), K_local = K / (disc area), scaled by the disc's K multiplier.
+//
+// Test timings: -d TlocalAdaptation=2000 -d TclimateChange=4000
+// Requires SLiM 5.
+
+
+///// v1.2 AND CULL-MODULE FUNCTIONS (adapted to one subpopulation) ///////
+
+function (float) temperatureToAlleleOptimum(float temperatures)
+{
+	return startAlleleOptimum +
+		(temperatures - startTemperature) *
+		(endAlleleOptimum - startAlleleOptimum) /
+		(endTemperature - startTemperature);
+}
+
+// individuals of population popIndex (-1 = all living individuals)
+function (object<Individual>) popIndividuals(integer$ popIndex)
+{
+	inds = p1.individuals;
+	if (popIndex < 0)
+		return inds;
+	return inds[inds.tag == popIndex];
+}
+
+// Heterozygosity Ne = pi / (4 * mu), neutral m1 only
+function (Nf$) neHeterozygosity(integer$ popIndex)
+{
+	inds = popIndividuals(popIndex);
+	if (size(inds) == 0)
+		return NULL;
+	pi = calcHeterozygosity(inds.haplosomes, sim.mutationsOfType(m1));
+	return pi / (4 * neutralMutationRate);
+}
+
+function (integer) tabulateFecundity(object<Individual> offspring, integer parentalIDs)
+{
+	parentIDs = offspring.pedigreeParentIDs;
+	base = min(parentalIDs);
+	counts = tabulate(parentIDs - base, max(parentalIDs) - base);
+	return counts[parentalIDs - base];
+}
+
+// Waples (2002) inbreeding Ne from a fecundity distribution
+function (Nf$) waplesNe(integer k)
+{
+	numParents = size(k);
+	if (numParents < 2)
+		return NULL;
+	meanFecundity = mean(k);
+	if (meanFecundity == 0)
+		return NULL;
+	denominator = meanFecundity - 1 + var(k) / meanFecundity;
+	if (denominator <= 0)
+		return NULL;
+	return (numParents * meanFecundity - 2) / denominator;
+}
+
+function (Ni) parentalFecundity(void)
+{
+	parentalIDs = sim.getValue("previousPedigreeIDs");
+	if (isNULL(parentalIDs))
+		return NULL;
+	offspring = p1.individuals;
+	if ((size(parentalIDs) < 2) | (size(offspring) == 0))
+		return NULL;
+	if (min(offspring.pedigreeParentIDs) < 0)
+		return NULL;
+	return tabulateFecundity(offspring, parentalIDs);
+}
+
+// Inbreeding Ne; parents grouped by the population they reproduced in
+function (Nf$) neInbreeding(integer$ popIndex)
+{
+	k = parentalFecundity();
+	if (isNULL(k))
+		return NULL;
+	if (popIndex < 0)
+		return waplesNe(k);
+	parentalPops = sim.getValue("previousPopIDs");
+	return waplesNe(k[parentalPops == popIndex]);
+}
+
+function (Nf$) phenotypeVariance(integer$ popIndex)
+{
+	inds = popIndividuals(popIndex);
+	if (size(inds) < 2)
+		return NULL;
+	return var(inds.tagF);
+}
+
+function (Nf$) meanPhenotype(integer$ popIndex)
+{
+	inds = popIndividuals(popIndex);
+	if (size(inds) == 0)
+		return NULL;
+	return mean(inds.tagF);
+}
+
+// Nei & Tajima (1981) Fc for biallelic loci, averaged across loci
+function (Nf$) neiTajimaFc(float x, float y)
+{
+	if (size(x) == 0)
+		return NULL;
+	d2 = (x - y)^2;
+	derivedTerm = d2 / ((x + y) / 2 - x * y);
+	ancestralTerm = d2 / (((1 - x) + (1 - y)) / 2 - (1 - x) * (1 - y));
+	return mean((derivedTerm + ancestralTerm) / 2);
+}
+
+// Temporal Ne (Waples 1989) over TEMPORAL_INTERVAL ticks; see cull module
+function (Nf$) temporalNeUpdate(integer$ popIndex)
+{
+	key = "temporalRecord_" + ((popIndex >= 0) ? ("p" + popIndex) else "total");
+	individuals = popIndividuals(popIndex);
+	previous = sim.getValue(key);
+	censusSize = size(individuals);
+
+	if (censusSize < 2)
+	{
+		sim.setValue(key, NULL);
+		return NULL;
+	}
+
+	wholeDeme = ((TEMPORAL_SAMPLE == 0) | (TEMPORAL_SAMPLE >= censusSize));
+	sampled = wholeDeme ? individuals else sample(individuals, TEMPORAL_SAMPLE);
+
+	mutations = sim.mutationsOfType(m1);
+	frequencies = sampled.haplosomes.mutationFrequenciesInHaplosomes(mutations);
+	sim.setValue(key, Dictionary("tick", sim.cycle, "ids", mutations.id,
+		"freqs", frequencies, "S", size(sampled), "N", censusSize, "whole", wholeDeme));
+
+	if (isNULL(previous))
+		return NULL;
+	interval = sim.cycle - previous.getValue("tick");
+	if (interval != TEMPORAL_INTERVAL)
+		return NULL;
+
+	startFreqs = previous.getValue("freqs");
+	startIDs = previous.getValue("ids");
+	keep = (startFreqs >= 0.05) & (startFreqs <= 0.95);
+	if (sum(keep) < 5)
+		return NULL;
+
+	x = startFreqs[keep];
+	positions = match(startIDs[keep], mutations.id);
+	y = rep(0.0, size(x));
+	found = positions >= 0;
+	y[found] = frequencies[positions[found]];
+
+	correctedF = neiTajimaFc(x, y) - 1 / (2 * previous.getValue("S")) - 1 / (2 * size(sampled));
+	if (wholeDeme & previous.getValue("whole"))
+		correctedF = correctedF + 1 / previous.getValue("N");
+	if (correctedF <= 0)
+		return NULL;
+	return interval / (2 * correctedF);
+}
+
+function (s$) currentPhase(void)
+{
+	if (sim.cycle < TlocalAdaptation)
+		return "local_adaptation";
+	if (sim.cycle >= TclimateChange)
+		return "climate_change";
+	if ((DISTURBANCE_TYPE != 0) & (sim.cycle >= Tdisturb))
+		return "post_disturbance";
+	return "historical_hold";
+}
+
+
+///// SPATIAL FUNCTIONS ////////////////////////////////////////////////////
+
+// Population (disc) index for each point, -1 if in no disc
+function (integer) popOfPosition(float x, float y)
+{
+	result = rep(-1, size(x));
+	for (pop in 0:(numPops - 1))
+	{
+		inside = ((x - cityX[pop])^2 + (y - cityY[pop])^2) <= PATCH_RADIUS^2;
+		result[inside] = pop;
+	}
+	return result;
+}
+
+// n uniform random points in disc pop; returns c(x, y) as a 2-row matrix
+function (float) pointsInDisc(integer$ pop, integer$ n)
+{
+	radius = PATCH_RADIUS * sqrt(runif(n));
+	angle = runif(n, 0, 2 * PI);
+	return rbind(cityX[pop] + radius * cos(angle), cityY[pop] + radius * sin(angle));
+}
+
+// Gaussian step of sd SIGMA_LOCAL, redrawn until the new position is inside
+// the individual's own disc (reprising at the disc edge)
+function (void) localDispersal(object<Individual> inds)
+{
+	if (size(inds) == 0)
+		return;
+	homeX = cityX[inds.tag];
+	homeY = cityY[inds.tag];
+	oldX = inds.x;
+	oldY = inds.y;
+	newX = oldX;
+	newY = oldY;
+	pending = rep(T, size(inds));
+
+	for (attempt in 1:100)
+	{
+		which_pending = which(pending);
+		if (size(which_pending) == 0)
+			break;
+		trialX = oldX[which_pending] + rnorm(size(which_pending), 0, SIGMA_LOCAL);
+		trialY = oldY[which_pending] + rnorm(size(which_pending), 0, SIGMA_LOCAL);
+		ok = ((trialX - homeX[which_pending])^2 + (trialY - homeY[which_pending])^2) <= PATCH_RADIUS^2;
+		ok = ok & (trialX >= 0) & (trialX <= mapWidth) & (trialY >= 0) & (trialY <= mapHeight);
+		newX[which_pending[ok]] = trialX[ok];
+		newY[which_pending[ok]] = trialY[ok];
+		pending[which_pending[ok]] = F;
+	}
+	// anyone still pending after 100 tries keeps its old position
+	inds.x = newX;
+	inds.y = newY;
+}
+
+// The temperature map for the current phase (phase 1 and 2: historical mean)
+function (object<SpatialMap>$) currentTemperatureMap(void)
+{
+	if (sim.cycle < TclimateChange)
+		return HIST_MAP;
+	yearIndex = min(sim.cycle - TclimateChange, numObservedYears - 1);
+	return ANNUAL_MAPS[yearIndex];
+}
+
+
+///// LOG WRITING (long format) ////////////////////////////////////////////
+
+// value as text; NULL (not computable) becomes NA
+function (s$) logValue(* x)
+{
+	if (size(x) == 0)
+		return "NA";
+	return asString(x);
+}
+
+// one row per population (cycle repeats numPops times). The *_metapop
+// columns hold the metapopulation Ne estimates, repeated on each row of a
+// tick; system totals (N, K, ...) are summed per cycle in the analysis.
+function (void) writeLogRows(void)
+{
+	cycle = asString(sim.cycle);
+	phase = currentPhase();
+	year = sim.getValue("currentClimateYear");
+	Kmult = sim.getValue("Kmult");
+	emigrants = sim.getValue("emigrants");
+	tags = p1.individuals.tag;
+	// metapopulation Ne (needs the genomes, so it cannot be rebuilt from
+	// the population rows afterwards); repeated on every population row
+	metapopNe = c(
+		logValue(neHeterozygosity(-1)),
+		logValue(neInbreeding(-1)),
+		logValue(sim.getValue("NeTemporal_total")));
+	lines = NULL;
+
+	for (pop in 0:(numPops - 1))
+	{
+		N = sum(tags == pop);
+		row = c(cycle, phase, year, asString(pop), cityNames[pop],
+			asString(N),
+			logValue(K * Kmult[pop]),
+			logValue(isNULL(emigrants) ? NULL else emigrants[pop]),
+			logValue(neHeterozygosity(pop)),
+			logValue(neInbreeding(pop)),
+			logValue(sim.getValue("NeTemporal_p" + pop)),
+			metapopNe,
+			logValue(NE_PROXY_RATIO * N),
+			logValue(sim.getValue("meanFitness_p" + pop)),
+			logValue(meanPhenotype(pop)),
+			logValue(sim.getValue("meanOptimum_p" + pop)),
+			logValue(phenotypeVariance(pop)));
+		lines = c(lines, paste(row, sep=","));
+	}
+	writeFile(logFilePath, lines, append=T);
+}
+
+
+initialize()
+{
+	initializeSLiMModelType("nonWF");
+	initializeSLiMOptions(keepPedigrees=T, dimensionality="xy");
+
+	///// RUN CONSTANTS (override with -d)
+	if (!exists("PROJECT_ROOT"))
+		defineConstant("PROJECT_ROOT", "C:/Users/WilliamWallisch/msc_workspace");
+	if (!exists("MAP_SET"))
+		defineConstant("MAP_SET", "smooth");       // "smooth" (bilinear) or "cells" (ERA5 blocks)
+	if (!exists("MIGRATION_FILE"))
+		defineConstant("MIGRATION_FILE", "grib_migration_matrix_4pop_decay.csv"); // v1.2's
+	if (!exists("RESULTS_DIR"))
+		defineConstant("RESULTS_DIR", PROJECT_ROOT + "/SLiM/results/continuous_v0.1/");
+
+	if (!exists("K"))
+		defineConstant("K", 1000);                 // target N per population
+	if (!exists("SELECTION_STRENGTH"))
+		defineConstant("SELECTION_STRENGTH", 0.05);
+	if (!exists("SELECTION_ON"))
+		defineConstant("SELECTION_ON", 1);          // 0 = neutral landscape test
+	if (!exists("TlocalAdaptation"))
+		defineConstant("TlocalAdaptation", 4000);
+	if (!exists("TclimateChange"))
+		defineConstant("TclimateChange", 8000);
+	if (!exists("END_TICK"))
+		defineConstant("END_TICK", -1);             // > 0: stop early (tests)
+
+	// Space (km)
+	if (!exists("PATCH_RADIUS"))
+		defineConstant("PATCH_RADIUS", 5.0);
+	if (!exists("SIGMA_LOCAL"))
+		defineConstant("SIGMA_LOCAL", 1.0);         // offspring dispersal sd
+	if (!exists("SIGMA_MATE"))
+		defineConstant("SIGMA_MATE", 1.0);          // mate-choice kernel sd
+	if (!exists("SIGMA_COMP"))
+		defineConstant("SIGMA_COMP", 2.0);          // competition kernel sd (1.0 gives N ~840: crowding; see handover)
+
+	// Disturbance (same meaning as the cull module)
+	if (!exists("DISTURBANCE_TYPE"))
+		defineConstant("DISTURBANCE_TYPE", 0);      // 0 none, 1 reduce, 2 destroy
+	if (!exists("TARGET_POP"))
+		defineConstant("TARGET_POP", 0);
+	if (!exists("DISTURBANCE_LAG"))
+		defineConstant("DISTURBANCE_LAG", 1);
+	if (!exists("DISTURBANCE_K_MULT"))
+		defineConstant("DISTURBANCE_K_MULT", 0.5);  // reduce: density kept (v0.1 = density version)
+	if (!exists("RECOLONIZE"))
+		defineConstant("RECOLONIZE", 0);
+
+	// Ne
+	if (!exists("TEMPORAL_INTERVAL"))
+		defineConstant("TEMPORAL_INTERVAL", 10);
+	if (!exists("TEMPORAL_SAMPLE"))
+		defineConstant("TEMPORAL_SAMPLE", 0);
+	if (!exists("NE_PROXY_RATIO"))
+		defineConstant("NE_PROXY_RATIO", 0.1);
+
+	// Position snapshots (x, y, pop, phenotype) for maps; 0 = off
+	if (!exists("SNAPSHOT_EVERY"))
+		defineConstant("SNAPSHOT_EVERY", 500);
+
+	if (!any(DISTURBANCE_TYPE == c(0, 1, 2)))
+		stop("DISTURBANCE_TYPE must be 0, 1 or 2.");
+	if ((DISTURBANCE_LAG < 1) | (DISTURBANCE_LAG >= TclimateChange - TlocalAdaptation))
+		stop("DISTURBANCE_LAG must be >= 1 and inside the historical hold.");
+	defineConstant("Tdisturb", TclimateChange - DISTURBANCE_LAG);
+
+	///// INPUTS
+	defineConstant("mapDirectory", PROJECT_ROOT + "/SLiM/input/continuous_swiss/");
+	defineConstant("oldInputDirectory", PROJECT_ROOT + "/SLiM/input/grib_pop_index_local_adaptation/");
+
+	metadata = readCSV(mapDirectory + "map_metadata.csv");
+	defineConstant("mapWidth", asFloat(metadata.getValue("width_km")));
+	defineConstant("mapHeight", asFloat(metadata.getValue("height_km")));
+	defineConstant("mapColumns", metadata.getValue("ncol"));
+	defineConstant("mapRows", metadata.getValue("nrow"));
+
+	locations = readCSV(mapDirectory + "population_locations_lv95.csv");
+	defineConstant("cityNames", locations.getValue("location"));
+	defineConstant("cityX", asFloat(locations.getValue("x_km")));
+	defineConstant("cityY", asFloat(locations.getValue("y_km")));
+	defineConstant("cityHistTempExpected",
+		asFloat(locations.getValue("hist_temp_" + MAP_SET)));
+
+	migrationInput = readCSV(oldInputDirectory + "migration_matrix/" + MIGRATION_FILE,
+		colNames=F).asMatrix();
+	defineConstant("numPops", nrow(migrationInput));
+	if (numPops != size(cityX))
+		stop("Migration matrix and location file disagree on the number of populations.");
+	defineConstant("migrationMatrix", migrationInput);
+
+	// map matrices (row 1 = north, column 1 = west; used as-is by SLiM 5)
+	setDirectory = mapDirectory + "maps_" + MAP_SET + "/";
+	defineConstant("HIST_VALUES", readCSV(setDirectory + "hist_1940_1970.csv",
+		colNames=F).asMatrix());
+	observedYears = 1970:2025;
+	defineConstant("observedYearLabels", observedYears);
+	defineConstant("numObservedYears", size(observedYears));
+	annualValues = Dictionary();
+	for (i in seqAlong(observedYears))
+		annualValues.setValue(asString(i), readCSV(setDirectory + "annual_" +
+			observedYears[i] + ".csv", colNames=F).asMatrix());
+	defineConstant("ANNUAL_VALUES", annualValues);
+	if ((ncol(HIST_VALUES) != mapColumns) | (nrow(HIST_VALUES) != mapRows))
+		stop("Map size does not match map_metadata.csv.");
+
+	defineConstant("Tend", (END_TICK > 0) ? END_TICK else (TclimateChange + numObservedYears - 1));
+
+	defineConstant("R", 1.01);
+	defineConstant("selectionStrength", SELECTION_STRENGTH);
+	defineConstant("overallMutationRate", 1e-7);
+	defineConstant("neutralFraction", 0.99);
+	defineConstant("neutralMutationRate", overallMutationRate * neutralFraction);
+	defineConstant("startAlleleOptimum", 2.0);
+	defineConstant("endAlleleOptimum", 6.0);
+	defineConstant("discArea", PI * PATCH_RADIUS^2);
+	defineConstant("densityK", K / discArea);    // individuals per km^2
+
+	///// OUTPUT
+	typeLabel = c("none", "reduce", "destroy")[DISTURBANCE_TYPE];
+	runLabel = "cont_v0.1_" + MAP_SET + "_" + typeLabel;
+	if (DISTURBANCE_TYPE == 1)
+		runLabel = runLabel + "_kmult" + DISTURBANCE_K_MULT;
+	if (DISTURBANCE_TYPE == 2)
+		runLabel = runLabel + "_recol" + RECOLONIZE;
+	if (DISTURBANCE_TYPE != 0)
+		runLabel = runLabel + "_p" + TARGET_POP + "_lag" + DISTURBANCE_LAG;
+	if (SELECTION_ON == 0)
+		runLabel = runLabel + "_neutral";
+	runLabel = runLabel + "_seed" + getSeed();
+	defineConstant("RUN_LABEL", runLabel);
+	defineConstant("logFilePath", RESULTS_DIR + RUN_LABEL + "_log.csv");             // one row per population per tick
+	defineConstant("snapshotPath", RESULTS_DIR + RUN_LABEL + "_positions.csv");
+
+	///// GENETICS (v1.2)
+	initializeMutationRate(overallMutationRate);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	initializeMutationType("m2", 0.5, "f", 0.0);
+	m2.convertToSubstitution = F;
+	m2.color = "red";
+	initializeGenomicElementType("g1", c(m1, m2), c(neutralFraction, 1 - neutralFraction));
+	initializeGenomicElement(g1, 0, 99999);
+
+	///// INTERACTIONS
+	// i1: competition (density regulation)
+	initializeInteractionType(1, "xy", reciprocal=T, maxDistance=3 * SIGMA_COMP);
+	i1.setInteractionFunction("n", 1.0, SIGMA_COMP);
+	// i2: mate choice
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=3 * SIGMA_MATE);
+	i2.setInteractionFunction("n", 1.0, SIGMA_MATE);
+}
+
+
+// mate-choice kernel must be evaluated before reproduction
+2: first()
+{
+	i2.evaluate(p1);
+}
+
+
+// v1.2 litter sizes; mates drawn by the spatial kernel; offspring start at
+// the first parent's position and inherit its population as their source
+reproduction()
+{
+	litterSize = rpois(1, R);
+	if (litterSize == 0)
+		return;
+
+	mates = i2.drawByStrength(individual, litterSize, exerterSubpop=p1);
+	for (mate in mates)
+	{
+		child = p1.addCrossed(individual, mate);
+		child.setSpatialPosition(individual.spatialPosition);
+		child.tag = individual.tag;
+	}
+}
+
+
+1 early()
+{
+	sim.addSubpop("p1", K * numPops);
+	p1.setSpatialBounds(c(0.0, 0.0, mapWidth, mapHeight));
+
+	// founders: K per disc, uniform within the disc
+	inds = p1.individuals;
+	for (pop in 0:(numPops - 1))
+	{
+		founders = inds[(pop * K):((pop + 1) * K - 1)];
+		xy = pointsInDisc(pop, K);
+		founders.x = drop(xy[0, ]);
+		founders.y = drop(xy[1, ]);
+		founders.tag = pop;
+	}
+
+	// temperature maps
+	histMap = p1.defineSpatialMap("hist", "xy", HIST_VALUES, interpolate=(MAP_SET == "smooth"),
+		valueRange=c(0.0, 16.0), colors=c("#2166ac", "#f7f7f7", "#b2182b"));
+	defineConstant("HIST_MAP", histMap);
+	annualMaps = c();
+	for (i in 0:(numObservedYears - 1))
+		annualMaps = c(annualMaps, p1.defineSpatialMap("y" + observedYearLabels[i], "xy",
+			ANNUAL_VALUES.getValue(asString(i)), interpolate=(MAP_SET == "smooth")));
+	defineConstant("ANNUAL_MAPS", annualMaps);
+
+	///// S1 ORIENTATION SELF-TEST: the map must return the R-extracted
+	///// temperature at every city; a flipped or transposed map fails here
+	cityPoints = c(rbind(cityX, cityY));
+	observedHist = HIST_MAP.mapValue(cityPoints);
+	for (pop in 0:(numPops - 1))
+		catn("Orientation check " + cityNames[pop] + ": map " + format("%.4f", observedHist[pop]) +
+			" C, expected " + format("%.4f", cityHistTempExpected[pop]) + " C");
+	if (any(abs(observedHist - cityHistTempExpected) > 0.01))
+		stop("Map orientation check FAILED: SLiM map values at the cities do not match R.");
+
+	// temperature-to-allele anchors, v1.2 rule, from the map at the cities
+	final2025 = ANNUAL_MAPS[numObservedYears - 1].mapValue(cityPoints);
+	defineConstant("startTemperature", min(observedHist));
+	defineConstant("endTemperature", max(final2025));
+	catn("Temperature-to-allele scale: " + startTemperature + " C = 2 copies, " +
+		endTemperature + " C = 6 copies.");
+
+	sim.setValue("Kmult", rep(1.0, numPops));
+	sim.setValue("migrationCounts", matrix(rep(0, numPops * numPops), nrow=numPops));
+
+	if (!fileExists(RESULTS_DIR))
+		createDirectory(RESULTS_DIR);
+
+	///// LOG, long format: one row per population per tick (rows written by
+	///// writeLogRows() in late())
+	writeFile(logFilePath, paste(c("cycle", "phase", "year", "pop", "location",
+		"N", "K", "emigrants", "Ne_het", "Ne_inb", "Ne_temporal",
+		"Ne_het_metapop", "Ne_inb_metapop", "Ne_temporal_metapop", "Ne_proxy",
+		"meanFitness", "meanPheno", "optimum", "varPheno"), sep=","));
+
+	if (SNAPSHOT_EVERY > 0)
+		writeFile(snapshotPath, "cycle,phase,x_km,y_km,pop,phenotype,optimum");
+
+	catn("Run " + RUN_LABEL + " | ticks 1-" + Tend + " | disc radius " + PATCH_RADIUS +
+		" km | density K " + format("%.2f", densityK) + " per km2");
+}
+
+
+1:Tend early()
+{
+	///// NON-OVERLAPPING GENERATIONS
+	inds = p1.individuals;
+	adults = inds[inds.age > 0];
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+	juveniles = p1.individuals;
+	if (size(juveniles) == 0)
+		return;
+
+	///// DISTURBANCE (once, on the new generation, before dispersal)
+	if ((DISTURBANCE_TYPE != 0) & (sim.cycle == Tdisturb))
+	{
+		Kmult = sim.getValue("Kmult");
+		targets = juveniles[juveniles.tag == TARGET_POP];
+		before = size(targets);
+		if (DISTURBANCE_TYPE == 1)
+		{
+			numKilled = asInteger(round(before * (1 - DISTURBANCE_K_MULT)));
+			if (numKilled > 0)
+				sim.killIndividuals(sample(targets, numKilled));
+			Kmult[TARGET_POP] = DISTURBANCE_K_MULT;
+		}
+		else
+		{
+			if (before > 0)
+				sim.killIndividuals(targets);
+			if (RECOLONIZE == 0)
+				Kmult[TARGET_POP] = 0.0;
+		}
+		sim.setValue("Kmult", Kmult);
+		juveniles = p1.individuals;
+		catn("DISTURBANCE at tick " + sim.cycle + ": p" + TARGET_POP + " " + before + " -> " +
+			sum(juveniles.tag == TARGET_POP) + ", K multiplier now " + Kmult[TARGET_POP] + ".");
+	}
+
+	///// LONG-DISTANCE DISPERSAL (migration matrix), then LOCAL DISPERSAL
+	emigrants = rep(0, numPops);
+	migrationCounts = sim.getValue("migrationCounts");
+	movedAll = c();
+	for (source in 0:(numPops - 1))
+	{
+		fromHere = juveniles[juveniles.tag == source];
+		if (size(fromHere) == 0)
+			next;
+		rates = drop(migrationMatrix[source, ]);
+		rates[source] = 0.0;
+		total = sum(rates);
+		if (total > 1.0)
+			stop("Migration rate above 1.");
+		if (total == 0.0)
+			next;
+		numMigrants = rbinom(1, size(fromHere), total);
+		if (numMigrants == 0)
+			next;
+		movers = sample(fromHere, numMigrants);
+		destinations = sample(0:(numPops - 1), numMigrants, replace=T, weights=rates);
+		for (destination in unique(destinations))
+		{
+			group = movers[destinations == destination];
+			xy = pointsInDisc(destination, size(group));
+			group.x = drop(xy[0, ]);
+			group.y = drop(xy[1, ]);
+			group.tag = destination;
+			migrationCounts[source, destination] = migrationCounts[source, destination] + size(group);
+		}
+		emigrants[source] = numMigrants;
+		movedAll = c(movedAll, movers);
+	}
+	sim.setValue("emigrants", emigrants);
+	sim.setValue("migrationCounts", migrationCounts);
+
+	// residents take a local step inside their own disc (founders too, tick 1)
+	if (size(movedAll) > 0)
+		residents = setDifference(juveniles, movedAll);
+	else
+		residents = juveniles;
+	residents = residents[residents.tag >= 0];
+	localDispersal(residents);
+
+	// population membership = disc the individual is in now
+	juveniles.tag = popOfPosition(juveniles.x, juveniles.y);
+	popIDs = juveniles.tag;
+
+	///// CLIMATE AND ALLELE OPTIMUM AT EACH INDIVIDUAL'S POSITION
+	temperatureMap = currentTemperatureMap();
+	temperatures = temperatureMap.mapValue(juveniles.spatialPosition);
+	optima = temperatureToAlleleOptimum(temperatures);
+	if (sim.cycle < TlocalAdaptation)
+	{
+		optima = optima * (asFloat(sim.cycle) / TlocalAdaptation);
+		currentYear = "Local Adaptation";
+	}
+	else if (sim.cycle < TclimateChange)
+		currentYear = "Historical Mean";
+	else
+		currentYear = asString(observedYearLabels[min(sim.cycle - TclimateChange, numObservedYears - 1)]);
+	sim.setValue("currentClimateYear", currentYear);
+
+	///// CLIMATE FITNESS (v1.2)
+	phenotypes = asFloat(juveniles.countOfMutationsOfType(m2));
+	juveniles.tagF = phenotypes;
+	if (SELECTION_ON)
+	{
+		fitness = 1.0 - (phenotypes - optima)^2 * selectionStrength;
+		fitness[fitness < 0.0] = 0.0;
+	}
+	else
+		fitness = rep(1.0, size(juveniles));
+
+	Kmult = sim.getValue("Kmult");
+	for (pop in 0:(numPops - 1))
+	{
+		inPop = popIDs == pop;
+		hasValue = any(inPop) & (Kmult[pop] > 0);
+		sim.setValue("meanFitness_p" + pop, hasValue ? mean(fitness[inPop]) else NULL);
+		sim.setValue("meanOptimum_p" + pop, any(inPop) ? mean(optima[inPop]) else NULL);
+	}
+	living = (popIDs >= 0);
+	living[living] = Kmult[popIDs[living]] > 0;
+	sim.setValue("meanFitness_total", any(living) ? mean(fitness[living]) else NULL);
+
+	///// DENSITY REGULATION (local competition kernel), cap 1.5 as in v1.2
+	i1.evaluate(p1);
+	density = i1.localPopulationDensity(juveniles);
+	habitat = rep(0.0, size(juveniles));
+	habitat[living] = Kmult[popIDs[living]];
+	densityEffect = pmin(densityK * habitat / density, 1.5);
+
+	juveniles.fitnessScaling = fitness * densityEffect;
+
+	///// POSITION SNAPSHOT
+	takeSnapshot = (SNAPSHOT_EVERY > 0) & ((sim.cycle % SNAPSHOT_EVERY == 0) |
+		(sim.cycle >= TclimateChange) | (sim.cycle == 1));
+	if (takeSnapshot)
+	{
+		lines = asString(sim.cycle) + "," + currentPhase() + "," + format("%.3f", juveniles.x) + "," +
+			format("%.3f", juveniles.y) + "," + popIDs + "," + phenotypes + "," + format("%.3f", optima);
+		writeFile(snapshotPath, lines, append=T);
+	}
+}
+
+
+// temporal Ne, log row, then store the parental generation for inbreeding Ne
+1:Tend late()
+{
+	if (sim.cycle % TEMPORAL_INTERVAL == 0)
+	{
+		for (pop in 0:(numPops - 1))
+			sim.setValue("NeTemporal_p" + pop, temporalNeUpdate(pop));
+		sim.setValue("NeTemporal_total", temporalNeUpdate(-1));
+	}
+	else
+	{
+		for (pop in 0:(numPops - 1))
+			sim.setValue("NeTemporal_p" + pop, NULL);
+		sim.setValue("NeTemporal_total", NULL);
+	}
+
+	writeLogRows();
+
+	survivors = p1.individuals;
+	sim.setValue("previousPedigreeIDs", survivors.pedigreeID);
+	sim.setValue("previousPopIDs", survivors.tag);
+
+	if (p1.individualCount == 0)
+	{
+		catn("All populations extinct at tick " + sim.cycle + ".");
+		sim.simulationFinished();
+	}
+	else if ((sim.cycle % 500 == 0) | (sim.cycle >= TclimateChange - 1) | (sim.cycle == Tdisturb))
+	{
+		counts = sapply(0:(numPops - 1), "sum(survivors.tag == applyValue);");
+		catn("Tick " + sim.cycle + " | " + currentPhase() + " | N: " + paste(counts, sep=" ") +
+			" | outside: " + sum(survivors.tag < 0));
+	}
+}
+
+
+Tend late()
+{
+	catn("Long-distance migrants, rows = source, columns = destination:");
+	print(sim.getValue("migrationCounts"));
+	sim.simulationFinished();
+}

@@ -1,0 +1,751 @@
+// Local adaptation to observed Swiss temperatures - v1.2 + DISTURBANCE
+// ("cull module"). Biology is v1.2 unchanged: nonWF, non-overlapping
+// generations, phenotype = m2 copy count, fitness 1 - s(phenotype - optimum)^2,
+// K = 1000 per deme, R = 1.01, migration matrix, 4000/8000 phase timings.
+//
+// WHAT THIS ADDS
+//
+// 1. A one-off disturbance to one or more target demes (TARGET_POP can be a
+//    single number or a vector, e.g. c(0, 1)), DISTURBANCE_LAG ticks before
+//    climate change begins (tick Tdisturb = TclimateChange - DISTURBANCE_LAG):
+//
+//      DISTURBANCE_TYPE 0  none (control; identical dynamics to v1.2)
+//      DISTURBANCE_TYPE 1  reduce  - kill (1 - DISTURBANCE_K_MULT) of the deme
+//                          and multiply its K by DISTURBANCE_K_MULT for good
+//                          (default 0.5 = "cut in half", i.e. habitat loss)
+//      DISTURBANCE_TYPE 2  destroy - kill every individual in the deme
+//
+//    For destroy, RECOLONIZE sets what happens to the habitat:
+//      RECOLONIZE 0  habitat removed: K = 0, the deme is a sink (migrants that
+//                    arrive die). The population is NOT maintained.
+//      RECOLONIZE 1  habitat intact: K unchanged, immigrants can refound it.
+//                    If refounded, it counts as maintained (decided with Billy,
+//                    2026-09-29); its Ne only matters for Ne 500 if it recovers.
+//
+//    Suggested DISTURBANCE_LAG treatments (1 tick = 1 generation):
+//      1     pure demographic effect (habitat lost "right now")
+//      100   ~Ne/10, partial genetic erosion
+//      500   ~Ne/2, most diversity loss has happened (Mualim et al. 2026 mid term)
+//      2000  ~4 x the halved deme's K, near re-equilibrium of diversity
+//    The lag must be < TclimateChange - TlocalAdaptation (4000 by default).
+//
+// 2. Extra log columns, per deme and for the whole system, every tick:
+//      phase, K, Ne_temporal (Nei-Tajima Fc; Waples 1989), Ne_proxy (0.1 x N,
+//      the field rule of thumb, logged so it can be validated against the
+//      simulated Ne), mean climate fitness (before density regulation), mean
+//      phenotype and optimum, plus v1.2's N, Ne_het, Ne_inb and varPheno.
+//
+// TEMPORAL Ne (Hoban's recommended estimator for simulations)
+//   Every TEMPORAL_INTERVAL ticks, neutral m1 frequencies are recorded in each
+//   deme. Over the interval g: Fc averaged across loci that were at frequency
+//   0.05-0.95 at the start, then
+//     sample of S individuals (TEMPORAL_SAMPLE > 0; sampling plan I):
+//        Ne = g / (2 [Fc - 1/(2 S0) - 1/(2 St)])
+//     whole deme (TEMPORAL_SAMPLE = 0, default; plan II with S = N):
+//        Ne = g / (2 [Fc - 1/(2 N0) - 1/(2 Nt) + 1/N0])
+//   NA when the corrected Fc is <= 0 (drift undetectable: Ne "infinite").
+//   CAVEATS: v1.2's genome is one 100 kb block with r = 1e-8, so m1 loci are
+//   tightly linked to each other and to the selected m2 sites. Temporal Ne
+//   therefore includes linked selection (Hoban: under selection Ne should fall
+//   below N - this measures it) and is noisy (few independent loci).
+//   Migration also inflates frequency change, lowering per-deme temporal Ne.
+//
+// Every constant below can be set from the command line with -d, e.g.
+//   slim -d DISTURBANCE_TYPE=2 -d RECOLONIZE=0 -d TARGET_POP=1 \
+//        -d DISTURBANCE_LAG=500 -s 42 grib_ramp_v1.2_disturbance.slim
+// Several demes at once (all get the same disturbance type, at the same tick):
+//   slim -d "TARGET_POP=c(0,2)" -d DISTURBANCE_TYPE=2 -d RECOLONIZE=0 ...
+//
+// Output (long format): RESULTS_DIR/<run label>_log.csv, one row per
+// population per tick (cycle repeats numPops times). The three *_metapop
+// columns hold the metapopulation Ne estimates, repeated on each row of a
+// tick; system totals (N, K, ...) are summed per cycle in the analysis.
+// Requires SLiM 5 (Haplosome API).
+
+
+///// v1.2 FUNCTIONS (unchanged) //////////////////////////////////////////
+
+function (float) temperatureToAlleleOptimum(float temperatures)
+{
+	return startAlleleOptimum +
+		(temperatures - startTemperature) *
+		(endAlleleOptimum - startAlleleOptimum) /
+		(endTemperature - startTemperature);
+}
+
+// Heterozygosity Ne = pi / (4 * mu), neutral m1 mutations only
+function (Nf$) estimateNeHeterozygosity(object<Haplosome> haplosomes)
+{
+	if (size(haplosomes) == 0)
+		return NULL;
+
+	pi = calcHeterozygosity(haplosomes, sim.mutationsOfType(m1));
+	return pi / (4 * neutralMutationRate);
+}
+
+function (Nf$) subpopNeHeterozygosity(integer$ popIndex)
+{
+	subpop = sim.subpopulations[popIndex];
+
+	if (subpop.individualCount == 0)
+		return NULL;
+
+	return estimateNeHeterozygosity(subpop.individuals.haplosomes);
+}
+
+function (Nf$) metapopNeHeterozygosity(void)
+{
+	individuals = sim.subpopulations.individuals;
+
+	if (size(individuals) == 0)
+		return NULL;
+
+	return estimateNeHeterozygosity(individuals.haplosomes);
+}
+
+// Offspring per parental individual, including zeros
+function (integer) tabulateFecundity(object<Individual> offspring,
+	integer parentalIDs)
+{
+	parentIDs = offspring.pedigreeParentIDs;
+	base = min(parentalIDs);
+	counts = tabulate(parentIDs - base, max(parentalIDs) - base);
+	return counts[parentalIDs - base];
+}
+
+// Inbreeding Ne (Waples 2002, SLiM manual section 9.11)
+function (Nf$) waplesNe(integer k)
+{
+	numParents = size(k);
+
+	if (numParents < 2)
+		return NULL;
+
+	meanFecundity = mean(k);
+
+	if (meanFecundity == 0)
+		return NULL;
+
+	denominator = meanFecundity - 1 + var(k) / meanFecundity;
+
+	if (denominator <= 0)
+		return NULL;
+
+	return (numParents * meanFecundity - 2) / denominator;
+}
+
+function (Ni) parentalFecundity(void)
+{
+	parentalIDs = sim.getValue("previousPedigreeIDs");
+
+	if (isNULL(parentalIDs))
+		return NULL;
+
+	offspring = sim.subpopulations.individuals;
+
+	if ((size(parentalIDs) < 2) | (size(offspring) == 0))
+		return NULL;
+
+	if (min(offspring.pedigreeParentIDs) < 0)
+		return NULL;
+
+	return tabulateFecundity(offspring, parentalIDs);
+}
+
+function (Nf$) metapopNeInbreeding(void)
+{
+	k = parentalFecundity();
+
+	if (isNULL(k))
+		return NULL;
+
+	return waplesNe(k);
+}
+
+// Parents grouped by the deme in which they reproduced
+function (Nf$) subpopNeInbreeding(integer$ popIndex)
+{
+	k = parentalFecundity();
+
+	if (isNULL(k))
+		return NULL;
+
+	parentalPops = sim.getValue("previousSubpopIDs");
+	return waplesNe(k[parentalPops == popIndex]);
+}
+
+function (Nf$) subpopPhenotypeVariance(integer$ popIndex)
+{
+	subpop = sim.subpopulations[popIndex];
+
+	if (subpop.individualCount < 2)
+		return NULL;
+
+	return var(subpop.individuals.tagF);
+}
+
+function (Nf$) metapopPhenotypeVariance(void)
+{
+	individuals = sim.subpopulations.individuals;
+
+	if (size(individuals) < 2)
+		return NULL;
+
+	return var(individuals.tagF);
+}
+
+
+///// NEW FUNCTIONS ////////////////////////////////////////////////////////
+
+// Mean m2 phenotype of a deme (tagF holds the phenotype set this tick)
+function (Nf$) subpopMeanPhenotype(integer$ popIndex)
+{
+	subpop = sim.subpopulations[popIndex];
+
+	if (subpop.individualCount == 0)
+		return NULL;
+
+	return mean(subpop.individuals.tagF);
+}
+
+// Nei & Tajima (1981) Fc for biallelic loci, averaged across loci.
+// x = start frequencies, y = end frequencies of the same mutations.
+function (Nf$) neiTajimaFc(float x, float y)
+{
+	if (size(x) == 0)
+		return NULL;
+
+	d2 = (x - y)^2;
+	derivedTerm = d2 / ((x + y) / 2 - x * y);
+	ancestralTerm = d2 / (((1 - x) + (1 - y)) / 2 - (1 - x) * (1 - y));
+	return mean((derivedTerm + ancestralTerm) / 2);
+}
+
+// Record this tick's neutral allele frequencies for one deme (popIndex >= 0)
+// or for the whole system (popIndex = -1), and, if a record from exactly
+// TEMPORAL_INTERVAL ticks ago exists, return the temporal Ne over that
+// interval. The new record replaces the old one.
+function (Nf$) temporalNeUpdate(integer$ popIndex)
+{
+	if (popIndex >= 0)
+	{
+		key = "temporalRecord_p" + popIndex;
+		individuals = sim.subpopulations[popIndex].individuals;
+	}
+	else
+	{
+		key = "temporalRecord_total";
+		individuals = sim.subpopulations.individuals;
+	}
+
+	previous = sim.getValue(key);
+	censusSize = size(individuals);
+
+	if (censusSize < 2)
+	{
+		sim.setValue(key, NULL);
+		return NULL;
+	}
+
+	wholeDeme = ((TEMPORAL_SAMPLE == 0) | (TEMPORAL_SAMPLE >= censusSize));
+
+	if (wholeDeme)
+		sampled = individuals;
+	else
+		sampled = sample(individuals, TEMPORAL_SAMPLE);
+
+	mutations = sim.mutationsOfType(m1);
+	frequencies = sampled.haplosomes.mutationFrequenciesInHaplosomes(mutations);
+
+	record = Dictionary("tick", sim.cycle, "ids", mutations.id,
+		"freqs", frequencies, "S", size(sampled), "N", censusSize,
+		"whole", wholeDeme);
+	sim.setValue(key, record);
+
+	if (isNULL(previous))
+		return NULL;
+
+	interval = sim.cycle - previous.getValue("tick");
+
+	if (interval != TEMPORAL_INTERVAL)
+		return NULL;
+
+	// loci informative at the start of the interval
+	startFreqs = previous.getValue("freqs");
+	startIDs = previous.getValue("ids");
+	keep = (startFreqs >= 0.05) & (startFreqs <= 0.95);
+
+	if (sum(keep) < 5)
+		return NULL;
+
+	x = startFreqs[keep];
+
+	// end frequencies; mutations lost from the whole simulation are at 0
+	positions = match(startIDs[keep], mutations.id);
+	y = rep(0.0, size(x));
+	found = positions >= 0;
+	y[found] = frequencies[positions[found]];
+
+	Fc = neiTajimaFc(x, y);
+	S0 = previous.getValue("S");
+	St = size(sampled);
+	correctedF = Fc - 1 / (2 * S0) - 1 / (2 * St);
+
+	// whole deme at both ends: plan II with S = N
+	if (wholeDeme & previous.getValue("whole"))
+		correctedF = correctedF + 1 / previous.getValue("N");
+
+	if (correctedF <= 0)
+		return NULL;
+
+	return interval / (2 * correctedF);
+}
+
+// Current phase label
+function (s$) currentPhase(void)
+{
+	if (sim.cycle < TlocalAdaptation)
+		return "local_adaptation";
+
+	if (sim.cycle >= TclimateChange)
+		return "climate_change";
+
+	if ((DISTURBANCE_TYPE != 0) & (sim.cycle >= Tdisturb))
+		return "post_disturbance";
+
+	return "historical_hold";
+}
+
+
+///// LOG WRITING (long format) ////////////////////////////////////////////
+
+// value as text; NULL (not computable) becomes NA
+function (s$) logValue(* x)
+{
+	if (size(x) == 0)
+		return "NA";
+	return asString(x);
+}
+
+// one row per population (metapopulation Ne repeated on each row)
+function (void) writeLogRows(void)
+{
+	cycle = asString(sim.cycle);
+	phase = currentPhase();
+	year = sim.getValue("currentClimateYear");
+	Kvec = sim.getValue("Kvec");
+	optima = sim.getValue("currentAlleleOptima");
+	// metapopulation Ne (needs the genomes, so it cannot be rebuilt from
+	// the population rows afterwards); repeated on every population row
+	metapopNe = c(
+		logValue(metapopNeHeterozygosity()),
+		logValue(metapopNeInbreeding()),
+		logValue(sim.getValue("NeTemporal_total")));
+	lines = NULL;
+
+	for (pop in 0:(numPops - 1))
+	{
+		N = sim.subpopulations[pop].individualCount;
+		row = c(cycle, phase, year, asString(pop), popNames[pop],
+			asString(N),
+			logValue(Kvec[pop]),
+			logValue(subpopNeHeterozygosity(pop)),
+			logValue(subpopNeInbreeding(pop)),
+			logValue(sim.getValue("NeTemporal_p" + pop)),
+			metapopNe,
+			logValue(NE_PROXY_RATIO * N),
+			logValue(sim.getValue("meanFitness_p" + pop)),
+			logValue(subpopMeanPhenotype(pop)),
+			logValue(optima[pop]),
+			logValue(subpopPhenotypeVariance(pop)));
+		lines = c(lines, paste(row, sep=","));
+	}
+	writeFile(logFilePath, lines, append=T);
+}
+
+
+initialize(){
+	initializeSLiMModelType("nonWF");
+	initializeSLiMOptions(keepPedigrees=T);
+
+	///// RUN CONSTANTS (override with -d)
+	if (!exists("PROJECT_ROOT"))
+		defineConstant("PROJECT_ROOT", "C:/Users/WilliamWallisch/msc_workspace");
+	if (!exists("MIGRATION_FILE"))
+		defineConstant("MIGRATION_FILE", "grib_migration_matrix_4pop_decay.csv"); // v1.2's matrix
+	if (!exists("RESULTS_DIR"))
+		defineConstant("RESULTS_DIR", PROJECT_ROOT + "/SLiM/results/v1.2_disturbance/");
+
+	if (!exists("K"))
+		defineConstant("K", 1000);
+	if (!exists("SELECTION_STRENGTH"))
+		defineConstant("SELECTION_STRENGTH", 0.05);
+	if (!exists("TlocalAdaptation"))
+		defineConstant("TlocalAdaptation", 4000); // historical mean is reached
+	if (!exists("TclimateChange"))
+		defineConstant("TclimateChange", 8000);   // observed climate begins
+
+	// Disturbance
+	if (!exists("DISTURBANCE_TYPE"))
+		defineConstant("DISTURBANCE_TYPE", 1);    // 0 none, 1 reduce, 2 destroy
+	if (!exists("TARGET_POP"))
+		defineConstant("TARGET_POP", c(0, 1, 2, 3));          // 0 Geneva, 1 Bern, 2 Zurich, 3 St. Gallen
+	if (!exists("DISTURBANCE_LAG"))
+		defineConstant("DISTURBANCE_LAG", 1);     // ticks before climate change
+	if (!exists("DISTURBANCE_K_MULT"))
+		defineConstant("DISTURBANCE_K_MULT", 0.5); // reduce: fraction of K kept
+	if (!exists("RECOLONIZE"))
+		defineConstant("RECOLONIZE", 1);          // destroy: 0 habitat removed, 1 intact
+
+	// Temporal Ne
+	if (!exists("TEMPORAL_INTERVAL"))
+		defineConstant("TEMPORAL_INTERVAL", 10);  // generations between samples
+	if (!exists("TEMPORAL_SAMPLE"))
+		defineConstant("TEMPORAL_SAMPLE", 0);     // 0 = whole deme, else individuals sampled
+
+	// Field proxy
+	if (!exists("NE_PROXY_RATIO"))
+		defineConstant("NE_PROXY_RATIO", 0.1);
+
+	// Checks
+	if (!any(DISTURBANCE_TYPE == c(0, 1, 2)))
+		stop("DISTURBANCE_TYPE must be 0, 1 or 2.");
+	if ((DISTURBANCE_LAG < 1) | (DISTURBANCE_LAG >= TclimateChange - TlocalAdaptation))
+		stop("DISTURBANCE_LAG must be >= 1 and inside the historical hold.");
+	if ((DISTURBANCE_K_MULT < 0.0) | (DISTURBANCE_K_MULT > 1.0))
+		stop("DISTURBANCE_K_MULT must be between 0 and 1.");
+
+	defineConstant("Tdisturb", TclimateChange - DISTURBANCE_LAG);
+
+	///// INPUTS
+	defineConstant("inputDirectory", PROJECT_ROOT +
+		"/SLiM/input/grib_pop_index_local_adaptation/");
+	migrationInput = readCSV(inputDirectory + "migration_matrix/" + MIGRATION_FILE,
+		colNames=F).asMatrix();
+	climateInput = readCSV(inputDirectory +
+		"climate_matrix/grib_climate_matrix_4pop_degrees_c_1940_2025.csv",
+		colNames=F).asMatrix();
+	yearInput = asInteger(drop(readCSV(inputDirectory +
+		"climate_matrix/grib_climate_years_4pop_1940_2025.csv",
+		colNames=F).asMatrix()));
+
+	defineConstant("numPops", nrow(migrationInput));
+	defineConstant("migrationMatrix", migrationInput);
+	defineConstant("climateMatrix", climateInput);
+	defineConstant("climateYears", yearInput);
+	defineConstant("R", 1.01);
+	defineConstant("selectionStrength", SELECTION_STRENGTH);
+	defineConstant("fecunditySkewSD", 0.0); // v1.2 default, ideal Poisson
+
+	defineConstant("popNames", (numPops == 4) ?
+		c("Geneva", "Bern", "Zurich", "St_Gallen") else ("p" + (0:(numPops - 1))));
+
+	if (size(TARGET_POP) == 0)
+		stop("TARGET_POP must hold at least one population.");
+	if (any(TARGET_POP < 0) | any(TARGET_POP >= numPops))
+		stop("TARGET_POP out of range: every value must be 0 to " + (numPops - 1) + ".");
+	if (size(unique(TARGET_POP)) != size(TARGET_POP))
+		stop("TARGET_POP lists the same population twice.");
+
+	defineConstant("overallMutationRate", 1e-7);
+	defineConstant("neutralFraction", 0.99);
+	defineConstant("neutralMutationRate", overallMutationRate * neutralFraction);
+
+	defineConstant("startAlleleOptimum", 2.0);
+	defineConstant("endAlleleOptimum", 6.0);
+
+	historicalRows = which((climateYears >= 1940) & (climateYears <= 1970));
+	observedRows = which(climateYears >= 1970);
+	historicalMeans = apply(climateMatrix[historicalRows, ], 1, "mean(applyValue);");
+
+	defineConstant("historicalMeanClimate", historicalMeans);
+	defineConstant("observedClimateRows", observedRows);
+	defineConstant("numObservedYears", size(observedRows));
+	defineConstant("Tend", TclimateChange + numObservedYears - 1);
+
+	finalTemperatures = drop(climateInput[observedRows[size(observedRows) - 1], ]);
+	defineConstant("startTemperature", min(historicalMeans));
+	defineConstant("endTemperature", max(finalTemperatures));
+	defineConstant("finalClimate", finalTemperatures);
+	defineConstant("historicalAlleleOptima", temperatureToAlleleOptimum(historicalMeanClimate));
+	defineConstant("finalAlleleOptima", temperatureToAlleleOptimum(finalClimate));
+
+	///// OUTPUT FILE
+	typeLabel = c("none", "reduce", "destroy")[DISTURBANCE_TYPE];
+	runLabel = "v1.2dist_" + typeLabel;
+	if (DISTURBANCE_TYPE == 1)
+		runLabel = runLabel + "_kmult" + DISTURBANCE_K_MULT;
+	if (DISTURBANCE_TYPE == 2)
+		runLabel = runLabel + "_recol" + RECOLONIZE;
+	if (DISTURBANCE_TYPE != 0)
+		runLabel = runLabel + "_p" + paste(sort(TARGET_POP), sep="") + "_lag" + DISTURBANCE_LAG;   // e.g. _p01
+	runLabel = runLabel + "_seed" + getSeed();
+	defineConstant("RUN_LABEL", runLabel);
+	defineConstant("logFilePath", RESULTS_DIR + RUN_LABEL + "_log.csv");
+
+	catn("Run: " + RUN_LABEL);
+	catn("Disturbance tick " + Tdisturb + ", climate change tick " +
+		TclimateChange + ", end tick " + Tend + ".");
+
+	///// GENETICS (v1.2)
+	initializeMutationRate(overallMutationRate);
+	initializeRecombinationRate(1e-8);
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral
+	initializeMutationType("m2", 0.5, "f", 0.0); // climate phenotype
+	m2.convertToSubstitution = F;
+	m2.color = "red";
+	initializeGenomicElementType("g1", c(m1, m2),
+		c(neutralFraction, 1 - neutralFraction));
+	initializeGenomicElement(g1, 0, 99999);
+}
+
+
+// v1.2 reproduction (random mating within the deme, Poisson litters)
+reproduction(){
+	expectedLitterSize = R;
+
+	if (fecunditySkewSD > 0.0)
+		expectedLitterSize = R *
+			exp(rnorm(1, -fecunditySkewSD^2 / 2, fecunditySkewSD));
+
+	litterSize = rpois(1, expectedLitterSize);
+
+	for (offspring in seqLen(litterSize)){
+		mate = subpop.sampleIndividuals(1, exclude=individual);
+
+		if (mate.size() > 0)
+			subpop.addCrossed(individual, mate);
+	}
+}
+
+
+1 early(){
+	for (pop in 0:(numPops - 1))
+		sim.addSubpop("p" + pop, K);
+
+	// per-deme carrying capacity; changed only by a disturbance
+	sim.setValue("Kvec", rep(asFloat(K), numPops));
+
+	if (!fileExists(RESULTS_DIR))
+		createDirectory(RESULTS_DIR);
+
+	// Long-format log: one row per population per tick (header here, rows
+	// written by writeLogRows() in late())
+	writeFile(logFilePath, paste(c("cycle", "phase", "year", "pop", "location",
+		"N", "K", "Ne_het", "Ne_inb", "Ne_temporal",
+		"Ne_het_metapop", "Ne_inb_metapop", "Ne_temporal_metapop", "Ne_proxy",
+		"meanFitness", "meanPheno", "optimum", "varPheno"), sep=","));
+	catn("Logging to: " + logFilePath);
+}
+
+
+1:Tend early(){
+	///// NON-OVERLAPPING GENERATIONS
+	allIndividuals = sim.subpopulations.individuals;
+	adults = allIndividuals[allIndividuals.age > 0];
+
+	if (size(adults) > 0)
+		sim.killIndividuals(adults);
+
+
+	///// DISTURBANCE (once, at Tdisturb, on the new generation before migration)
+	if ((DISTURBANCE_TYPE != 0) & (sim.cycle == Tdisturb))
+	{
+		Kvec = sim.getValue("Kvec");
+
+		// each target deme is disturbed on its own
+		for (popIndex in TARGET_POP)
+		{
+			target = sim.subpopulations[popIndex];
+			before = target.individualCount;
+			numKilled = 0;
+
+			if (DISTURBANCE_TYPE == 1)
+			{
+				numKilled = asInteger(round(before * (1 - DISTURBANCE_K_MULT)));
+				if (numKilled > 0)
+					sim.killIndividuals(sample(target.individuals, numKilled));
+				Kvec[popIndex] = K * DISTURBANCE_K_MULT;
+			}
+			else
+			{
+				numKilled = before;
+				if (before > 0)
+					sim.killIndividuals(target.individuals);
+				if (RECOLONIZE == 0)
+					Kvec[popIndex] = 0.0;
+			}
+
+			// killIndividuals takes effect immediately in nonWF models
+			catn("DISTURBANCE at tick " + sim.cycle + ": p" + popIndex + " (" +
+				popNames[popIndex] + ") " + before + " -> " + (before - numKilled) +
+				", K now " + Kvec[popIndex] + ".");
+		}
+
+		sim.setValue("Kvec", Kvec);
+	}
+
+
+	///// MIGRATION (v1.2)
+	allMigrants = c();
+	allDestinations = c();
+
+	for (sourcePop in 0:(numPops - 1)){
+		sourceSubpop = sim.subpopulations[sourcePop];
+
+		if (sourceSubpop.individualCount == 0)
+			next;
+
+		migrationRates = drop(migrationMatrix[sourcePop,]);
+		migrationRates[sourcePop] = 0.0;
+		totalMigrationRate = sum(migrationRates);
+
+		if (totalMigrationRate > 1.0)
+			stop("Migration rate above 1.");
+
+		if (totalMigrationRate == 0.0)
+			next;
+
+		numMigrants = rbinom(1, sourceSubpop.individualCount, totalMigrationRate);
+
+		if (numMigrants == 0)
+			next;
+
+		popMigrants = sample(sourceSubpop.individuals, numMigrants);
+		popDestinations = sample(0:(numPops - 1), numMigrants,
+			replace=T, weights=migrationRates);
+
+		allMigrants = c(allMigrants, popMigrants);
+		allDestinations = c(allDestinations, popDestinations);
+	}
+
+	if (size(allMigrants) > 0){
+		for (destinationPop in 0:(numPops - 1)){
+			migrants = allMigrants[allDestinations == destinationPop];
+
+			if (size(migrants) > 0)
+				sim.subpopulations[destinationPop].takeMigrants(migrants);
+		}
+	}
+
+
+	///// CURRENT CLIMATE AND ALLELE OPTIMUM (v1.2)
+	if (sim.cycle < TlocalAdaptation){
+		adaptProgress = asFloat(sim.cycle) / TlocalAdaptation;
+		climates = historicalMeanClimate;
+		alleleOptima = historicalAlleleOptima * adaptProgress;
+		currentYear = "Local Adaptation";
+	}
+	else if (sim.cycle < TclimateChange){
+		climates = historicalMeanClimate;
+		alleleOptima = historicalAlleleOptima;
+		currentYear = "Historical Mean";
+	}
+	else{
+		climateYearIndex = sim.cycle - TclimateChange;
+
+		if (climateYearIndex >= numObservedYears)
+			climateYearIndex = numObservedYears - 1;
+
+		climateRow = observedClimateRows[climateYearIndex];
+		climates = drop(climateMatrix[climateRow,]);
+		alleleOptima = temperatureToAlleleOptimum(climates);
+		currentYear = asString(climateYears[climateRow]);
+	}
+
+
+	///// CLIMATE FITNESS (v1.2) + logging of mean fitness
+	inds = sim.subpopulations.individuals;
+
+	if (size(inds) > 0){
+		phenotypes = asFloat(inds.countOfMutationsOfType(m2));
+		popIDs = inds.subpopulation.id;
+		popOptima = alleleOptima[popIDs];
+
+		fitness = 1.0 - (phenotypes - popOptima)^2 * selectionStrength;
+		fitness[fitness < 0.0] = 0.0;
+
+		inds.fitnessScaling = fitness;
+		inds.tagF = phenotypes;
+
+		// Mean fitness per deme. A sink deme (K = 0) holds only arriving
+		// migrants that are about to die, so it is logged as NA, and those
+		// migrants are left out of the total.
+		KvecNow = sim.getValue("Kvec");
+		for (pop in 0:(numPops - 1))
+		{
+			popFitness = fitness[popIDs == pop];
+			hasValue = (size(popFitness) > 0) & (KvecNow[pop] > 0);
+			sim.setValue("meanFitness_p" + pop, hasValue ? mean(popFitness) else NULL);
+		}
+		living = KvecNow[popIDs] > 0;
+		sim.setValue("meanFitness_total", any(living) ? mean(fitness[living]) else NULL);
+	}
+	else
+	{
+		for (pop in 0:(numPops - 1))
+			sim.setValue("meanFitness_p" + pop, NULL);
+		sim.setValue("meanFitness_total", NULL);
+	}
+
+
+	///// DENSITY REGULATION, per-deme K (K = 0 makes the deme a sink)
+	Kvec = sim.getValue("Kvec");
+
+	for (subpop in sim.subpopulations){
+		if (subpop.individualCount > 0)
+			subpop.fitnessScaling =
+				min(Kvec[subpop.id] / subpop.individualCount, 1.5);
+	}
+
+	sim.setValue("currentClimates", climates);
+	sim.setValue("currentAlleleOptima", alleleOptima);
+	sim.setValue("currentClimateYear", currentYear);
+}
+
+
+// Temporal Ne, then log the row, then store this tick's survivors as the
+// parental generation for next tick's inbreeding Ne.
+1:Tend late(){
+	if (sim.cycle % TEMPORAL_INTERVAL == 0)
+	{
+		for (pop in 0:(numPops - 1))
+			sim.setValue("NeTemporal_p" + pop, temporalNeUpdate(pop));
+		sim.setValue("NeTemporal_total", temporalNeUpdate(-1));
+	}
+	else
+	{
+		for (pop in 0:(numPops - 1))
+			sim.setValue("NeTemporal_p" + pop, NULL);
+		sim.setValue("NeTemporal_total", NULL);
+	}
+
+	writeLogRows();
+
+	survivors = sim.subpopulations.individuals;
+	sim.setValue("previousPedigreeIDs", survivors.pedigreeID);
+	sim.setValue("previousSubpopIDs", survivors.subpopulation.id);
+}
+
+
+// Console progress and total-extinction stop (v1.2)
+1:Tend late(){
+	totalPopulationSize = sum(sim.subpopulations.individualCount);
+
+	if (totalPopulationSize == 0){
+		catn("All populations extinct at tick " + sim.cycle + ".");
+		sim.simulationFinished();
+	}
+	else if ((sim.cycle % 500 == 0) | (sim.cycle >= Tdisturb - 1))
+	{
+		if ((sim.cycle % 500 == 0) | (sim.cycle >= TclimateChange - 1) |
+			(sim.cycle == Tdisturb) | (sim.cycle == Tdisturb - 1))
+			catn("Tick " + sim.cycle + " | " + currentPhase() + " | N: " +
+				paste(sim.subpopulations.individualCount, sep=" "));
+	}
+}
+
+
+Tend late(){
+	sim.simulationFinished();
+}

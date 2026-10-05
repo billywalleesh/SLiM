@@ -1,0 +1,84 @@
+initialize() {
+	initializeSLiMModelType("nonWF");
+	//k is being used as “carrying-capacity density”
+	defineConstant("K", 1000);
+	//S will be used as a spatial competition kernel width
+	defineConstant("S", 0.1);
+	
+	//initializeSLiMOptions(dimensionality="xy");
+	//fix "d"
+	initializeSLiMOptions(dimensionality="xy", periodicity="xy");
+	initializeMutationRate(1e-7);
+	initializeMutationType("m1", 0.5, "f", 0.0);
+	m1.convertToSubstitution = T;
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, 99999);
+	initializeRecombinationRate(1e-8);
+	
+	// spatial competition
+	initializeInteractionType(1, "xy", reciprocal=T, maxDistance= S*3);
+	//1 = max strength S = interaction function width
+	i1.setInteractionFunction("n", 1.0, S);
+	
+	// spatial mate choice
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=0.1);
+}
+
+2: first() {
+	i2.evaluate(p1);
+}
+reproduction() {
+	mate = i2.nearestNeighbors(individual, 3);
+	if (!mate.size())
+		return;
+	mate = sample(mate, 1);
+	subpop.addCrossed(individual, mate, count=rpois(1, 0.1));
+}
+2: early() {
+	offspring = p1.subsetIndividuals(maxAge=0);
+	//p1.deviatePositions(offspring, "reflecting", INF, "n", 0.02);
+	//fix d 
+	p1.deviatePositions(offspring, "periodic", INF, "n", 0.02);
+}
+1 early() {
+	sim.addSubpop("p1", 1000);
+	p1.individuals.setSpatialPosition(p1.pointUniform(1000));
+	mapValues = matrix(sqrt(runif(100, 0, 1)), nrow=10);
+	map = p1.defineSpatialMap("h", "xy", mapValues, interpolate=T,
+		valueRange=c(0.0, 1.0), colors=c("black", "white"));
+	defineConstant("MAP", map);
+	MAP.interpolate(5, "cubic");
+	MAP.rescale();
+	mapValues = cbind(mapValues, mapValues[,0]);
+	mapValues = rbind(mapValues, mapValues[0,]);
+}
+1: early() {
+	i1.evaluate(p1);
+	inds = sim.subpopulations.individuals;
+	competition = i1.totalOfNeighborStrengths(inds);
+	//The division by (2 * PI * S^2) rescales by the density of the (Gaussian) competition kernel
+	//The + 1 in the formula counts the focal individual itself
+	competition = (competition + 1) / (2 * PI * S^2);
+	//inds.fitnessScaling = K / competition;
+	
+	//use the map to define competirion and fitness scaling 
+	K_local = K * MAP.mapValue(inds.spatialPosition);
+	inds.fitnessScaling = K_local / competition;
+	
+	//fix a comment out lines 45,46, 49, and 50
+	//density = i1.localPopulationDensity(inds);
+	//inds.fitnessScaling = K / density;
+	
+	
+	// occasional natural disasters
+	if (runif(1) < 0.01) {
+		epicenter = p1.pointUniform();
+		d = i1.distanceFromPoint(epicenter, inds);
+		affected = inds[d < 0.3];
+		affected.color = "cornflowerblue";
+		affected.fitnessScaling = 0.0;
+	}
+}
+
+
+2000 late() { sim.outputFixedMutations(); }

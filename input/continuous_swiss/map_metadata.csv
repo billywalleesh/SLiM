@@ -1,0 +1,2 @@
+"crs","res_km","ncol","nrow","width_km","height_km","origin_x_km","origin_y_km","orientation","baseline_years","observed_years","source"
+"EPSG:2056 (LV95), km",2,169,96,336,190,2493,1099,"row 1 = north edge (y = height_km), column 1 = west edge (x = 0)","1940-1970","1970-2025","ERA5 daily 2 m temperature, 0.25 deg, annual means"
