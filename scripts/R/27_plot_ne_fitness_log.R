@@ -14,7 +14,7 @@
 # climate change if the run has no disturbance), so every tick is visible.
 
 # Read the data (change this path to where your file is)
-log_file <- "C:/Users/WilliamWallisch/msc_workspace/SLiM/results/v1.2_disturbance/v1.2dist_reduce_kmult0.5_p0123_lag1_seed376928783_log.csv"
+log_file <- "C:/Users/WilliamWallisch/msc_workspace/SLiM/results/ramp_v1.3.1_ne/grib_ramp_v1.3.1_log.csv"
 d_all <- read.csv(log_file)
 
 # Name for the pictures: the log's file name without "_log.csv"
@@ -178,7 +178,7 @@ make_plots <- function(start_cycle, label) {
     par(new = TRUE)
     plot(p$cycle, p$Ne_inb, type = "l", col = "darkgreen", lwd = lw,
          ylim = c(0, pop_ne_max * 1.05), xlab = "Generation", ylab = "Nc and Ne")
-    title(main = paste0("p", pop, " (", p$location[1], ")"), line = title_line)
+    title(main = paste0("p", pop), line = title_line)
     lines(p$cycle, p$Ne_het, col = "cornflowerblue", lwd = lw)
     lines(p$cycle, p$N, col = "black", lwd = lw)
     abline(h = 500, col = "grey40", lty = 2, lwd = 1.5)   # Ne 500 threshold
