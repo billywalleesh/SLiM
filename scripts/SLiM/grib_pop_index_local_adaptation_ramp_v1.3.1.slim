@@ -98,14 +98,15 @@
 
 initialize(){
 	initializeSLiMModelType("nonWF");
-	initializeSLiMOptions(keepPedigrees=T); // v1.1: pedigree IDs for Ne
+	initializeSLiMOptions(keepPedigrees=T);
 	
 	/** **Constants/Inputs/Outputs** */
 	///Input files
-	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/");
-	defineConstant("migrationFile", inputDirectory + "migration_matrix/run_1.csv");
-	defineConstant("climateFile", inputDirectory + "climate_matrix/run_1.csv");
-	defineConstant("yearFile", inputDirectory + "climate_matrix/grib_climate_years_8pop_1940_2025.csv");
+	defineConstant("inputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo/");
+	defineConstant("migrationFile", inputDirectory + "14102026/migration_matrices/run_1.csv");
+	defineConstant("climateFile", inputDirectory + "14102026/climate_matrices/run_1.csv");
+	defineConstant("yearFile", inputDirectory + "14102026/climate_years/grib_climate_years_8pop_1940_2025.csv");
+	defineConstant("masterFile", inputDirectory + "14102026/run_matrix_1000.csv");
 	
 	///Output files
 	defineConstant("outputDirectory", "C:/Users/WilliamWallisch/msc_workspace/SLiM/results/ramp_v1.3.1_ne/");
@@ -131,16 +132,16 @@ initialize(){
 	defineConstant("migrationMatrix", migrationInput);
 	defineConstant("climateMatrix", climateInput);
 	defineConstant("climateYears", yearInput);
-	defineConstant("K", 383);
+	defineConstant("K", 382);
 	defineConstant("R", 1.01);
-	defineConstant("selectionStrength", 0.021827841);
+	defineConstant("selectionStrength", 0.019055531);
 	defineConstant("TlocalAdaptation", 4000);//historical mean is reached
 	defineConstant("TclimateChange", 8000);//observed climate begins
 	
 	///Disturbance
-	defineConstant("targetPop", sample(0:7,3));//populations hit: 0 Geneva, 1 Bern, 2 Zurich, 3 St. Gallen. targetPop = 0:49 or sample(0:99, 30), c() = none or list
-	defineConstant("survival",0.103471774);//fraction of individuals left
-	defineConstant("habitat",0.835053483);//fraction of K left (0 = habitat gone, no recolonisation)
+	defineConstant("targetPop", c(0,2,3,4,5,6));//populations hit: 0 Geneva, 1 Bern, 2 Zurich, 3 St. Gallen. targetPop = 0:49 or sample(0:99, 30), c() = none or list
+	defineConstant("survival",0.259605651);//fraction of individuals left
+	defineConstant("habitat",0.465146747);//fraction of K left (0 = habitat gone, no recolonisation)
 	defineConstant("disturbanceLag",0);//ticks before climate change
 	defineConstant("Tdisturb", TclimateChange - disturbanceLag);// also used for the phase label
 	defineConstant("isDisturbed", (size(targetPop) > 0) & ((survival < 1.0) | (habitat < 1.0)));
