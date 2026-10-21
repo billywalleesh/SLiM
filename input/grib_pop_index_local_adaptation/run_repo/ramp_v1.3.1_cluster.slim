@@ -110,7 +110,7 @@ initialize(){
 	///Run settings
 	//These three can be set from the command line, ex:
 	//slim -d RUN=2 -d "INPUT_DIR='/path/to/14102026/'" -d "OUTPUT_DIR='/path/to/results/'" model.slim
-	//If they are not set (e.g. in SLiMgui), the values below are used.
+	//If they are not set (e.g. in SLiMgui), the values in constants/inputs/outputs are used.
 	if (!exists("RUN"))
 		defineConstant("RUN", 1);//which row of the run matrix to run
 	if (!exists("INPUT_DIR"))

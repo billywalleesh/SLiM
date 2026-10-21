@@ -75,8 +75,18 @@ D_inds
 D_habitat = runif(1000, min = D_habitat_min , max = D_habitat_max) 
 D_habitat
 
+disturbance_type <-sample(rep(c(0,1),500))
+disturbance_type
+length(disturbance_type) 
+mean(disturbance_type)
+
+#turn off the other kind of disturbance: 1 means nothing is lost
+D_inds[disturbance_type == 1] = 1      #habitat runs: no individuals killed
+D_habitat[disturbance_type == 0] = 1   #individual runs: habitat stays intact
+
+
 #create the matrix
-run_matrix = data.frame(run = 1:1000, K, n_populations, pop_ids, K_per_pop, selection_strength, slope_decay, D_pop, n_target, target_pops, D_inds, D_habitat)
+run_matrix = data.frame(run = 1:1000, K, n_populations, pop_ids, K_per_pop, selection_strength, slope_decay, D_pop, n_target, target_pops, D_inds, D_habitat, disturbance_type)
 run_matrix
 
 write.csv(run_matrix, "run_matrix_1000.csv", row.names = FALSE)
