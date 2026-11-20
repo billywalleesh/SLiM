@@ -64,8 +64,13 @@ for (i in 1:nrow(run_matrix)) {
   # no migration from a population to itself
   diag(mig) = 0
 
+  # SLiM's readCSV reads a column of only 0s as integer and asMatrix() then fails
+  # (an isolated population gives an all-zero column), so write every 0 as 0.0
+  mig_out = mig
+  mig_out[mig_out == 0] = "0.0"
+  
   # save it
-  write.table(mig, paste0("migration_matrices/run_", i, ".csv"), sep = ",", row.names = FALSE, col.names = FALSE)
+  write.table(mig_out, paste0("migration_matrices/run_", i, ".csv"), sep = ",", row.names = FALSE, col.names = FALSE, quote = FALSE)
 
   mean_emigration[i] = mean(rowSums(mig))
 }
