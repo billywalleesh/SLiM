@@ -1,0 +1,170 @@
+// Initial random seed:
+8000397
+
+// RunInitializeCallbacks():
+initializeSLiMModelType(modelType = 'nonWF');
+initializeSLiMOptions(keepPedigrees = T);
+           [,0]       [,1]       [,2]       [,3]       [,4]
+[0,]        0.0 0.00436653 0.00412997 0.00385435 0.00286016
+[1,] 0.00436653        0.0  0.0045606 0.00442069 0.00336671
+[2,] 0.00412997  0.0045606        0.0 0.00466837 0.00372871
+[3,] 0.00385435 0.00442069 0.00466837        0.0 0.00394289
+[4,] 0.00286016 0.00336671 0.00372871 0.00394289        0.0
+Run 397 | seed 8000397 | cities 1,2,3,4,6 | K per pop 997 | selection 0.0626053 | target cities 1,2,4 | survival 0.398086 | habitat 0.0454364
+initializeMutationRate(1e-07);
+initializeRecombinationRate(1e-08);
+initializeMutationType(1, 0.5, "f", 0);
+initializeMutationType(2, 0.5, "f", 0);
+initializeGenomicElementType(1, c(m1, m2), c(0.99, 0.01));
+initializeGenomicElement(g1, 0, 99999);
+Temperature-to-allele scale: 10.3501 C = 2.0 copies, 13.9868 C = 6.0 copies.
+p0 | Historical mean temperature: 10.3501 | Historical allele optimum: 2.0 | Final temperature: 13.091 | Final allele optimum: 5.01472.
+p1 | Historical mean temperature: 10.3893 | Historical allele optimum: 2.04311 | Final temperature: 12.878 | Final allele optimum: 4.78044.
+p2 | Historical mean temperature: 11.5359 | Historical allele optimum: 3.30427 | Final temperature: 13.9868 | Final allele optimum: 6.0.
+p3 | Historical mean temperature: 11.0865 | Historical allele optimum: 2.81 | Final temperature: 13.586 | Final allele optimum: 5.55916.
+p4 | Historical mean temperature: 11.4599 | Historical allele optimum: 3.22073 | Final temperature: 13.8728 | Final allele optimum: 5.87461.
+Disturbance at tick 8000: populations 0, 1, 3 keep 0.398086 of their individuals and 0.0454364 of their K.
+
+// Starting run at tick <start>:
+1 
+
+Logging to: /scratch/wwalli/TMP/ramp_v1.3.1_cluster/run_397_log.csv
+Tick 100 | Local Adaptation | N: 822 834 1002 995 996
+Tick 200 | Local Adaptation | N: 998 954 958 946 997
+Tick 300 | Local Adaptation | N: 897 960 990 995 998
+Tick 400 | Local Adaptation | N: 916 992 967 996 884
+Tick 500 | Local Adaptation | N: 812 982 884 988 914
+Tick 600 | Local Adaptation | N: 990 815 947 974 946
+Tick 700 | Local Adaptation | N: 975 995 978 980 900
+Tick 800 | Local Adaptation | N: 975 983 926 961 961
+Tick 900 | Local Adaptation | N: 859 979 919 828 977
+Tick 1000 | Local Adaptation | N: 945 929 906 960 951
+Tick 1100 | Local Adaptation | N: 926 878 920 963 949
+Tick 1200 | Local Adaptation | N: 849 957 874 892 865
+Tick 1300 | Local Adaptation | N: 970 923 949 952 886
+Tick 1400 | Local Adaptation | N: 895 783 926 918 913
+Tick 1500 | Local Adaptation | N: 917 957 943 936 949
+Tick 1600 | Local Adaptation | N: 962 962 862 839 876
+Tick 1700 | Local Adaptation | N: 960 885 841 967 894
+Tick 1800 | Local Adaptation | N: 970 955 915 885 930
+Tick 1900 | Local Adaptation | N: 926 941 804 928 929
+Tick 2000 | Local Adaptation | N: 924 961 893 939 989
+Tick 2100 | Local Adaptation | N: 841 956 951 906 978
+Tick 2200 | Local Adaptation | N: 916 950 885 966 1004
+Tick 2300 | Local Adaptation | N: 955 966 919 938 945
+Tick 2400 | Local Adaptation | N: 938 957 877 986 930
+Tick 2500 | Local Adaptation | N: 965 965 996 933 966
+Tick 2600 | Local Adaptation | N: 944 971 983 1001 996
+Tick 2700 | Local Adaptation | N: 972 966 995 993 982
+Tick 2800 | Local Adaptation | N: 974 894 966 948 965
+Tick 2900 | Local Adaptation | N: 889 796 935 978 958
+Tick 3000 | Local Adaptation | N: 975 956 982 986 915
+Tick 3100 | Local Adaptation | N: 951 889 944 965 988
+Tick 3200 | Local Adaptation | N: 876 928 909 987 971
+Tick 3300 | Local Adaptation | N: 895 922 965 990 947
+Tick 3400 | Local Adaptation | N: 988 910 953 974 894
+Tick 3500 | Local Adaptation | N: 945 885 843 981 880
+Tick 3600 | Local Adaptation | N: 788 983 928 982 956
+Tick 3700 | Local Adaptation | N: 999 949 863 977 918
+Tick 3800 | Local Adaptation | N: 989 965 825 839 939
+Tick 3900 | Local Adaptation | N: 1008 928 884 910 917
+Tick 4000 | Historical Mean | N: 985 990 872 927 831
+Tick 4100 | Historical Mean | N: 987 907 875 958 908
+Tick 4200 | Historical Mean | N: 965 964 910 950 853
+Tick 4300 | Historical Mean | N: 953 946 899 910 893
+Tick 4400 | Historical Mean | N: 881 996 914 896 894
+Tick 4500 | Historical Mean | N: 960 900 873 854 927
+Tick 4600 | Historical Mean | N: 963 825 893 937 942
+Tick 4700 | Historical Mean | N: 913 847 862 936 867
+Tick 4800 | Historical Mean | N: 764 986 913 958 954
+Tick 4900 | Historical Mean | N: 961 944 955 942 896
+Tick 5000 | Historical Mean | N: 908 819 828 920 947
+Tick 5100 | Historical Mean | N: 920 942 859 913 964
+Tick 5200 | Historical Mean | N: 934 962 900 961 919
+Tick 5300 | Historical Mean | N: 984 983 849 957 890
+Tick 5400 | Historical Mean | N: 732 981 868 944 954
+Tick 5500 | Historical Mean | N: 923 954 841 952 910
+Tick 5600 | Historical Mean | N: 875 929 905 962 933
+Tick 5700 | Historical Mean | N: 907 840 952 925 968
+Tick 5800 | Historical Mean | N: 904 909 917 923 960
+Tick 5900 | Historical Mean | N: 875 980 926 969 939
+Tick 6000 | Historical Mean | N: 879 913 889 941 868
+Tick 6100 | Historical Mean | N: 956 990 852 963 915
+Tick 6200 | Historical Mean | N: 939 1001 838 961 843
+Tick 6300 | Historical Mean | N: 926 931 802 865 860
+Tick 6400 | Historical Mean | N: 987 983 886 854 918
+Tick 6500 | Historical Mean | N: 873 834 904 957 927
+Tick 6600 | Historical Mean | N: 943 892 920 944 947
+Tick 6700 | Historical Mean | N: 887 995 870 929 797
+Tick 6800 | Historical Mean | N: 976 971 863 921 661
+Tick 6900 | Historical Mean | N: 950 974 901 944 933
+Tick 7000 | Historical Mean | N: 986 946 923 938 953
+Tick 7100 | Historical Mean | N: 920 931 824 971 793
+Tick 7200 | Historical Mean | N: 989 874 945 975 938
+Tick 7300 | Historical Mean | N: 955 762 895 938 804
+Tick 7400 | Historical Mean | N: 969 967 904 950 904
+Tick 7500 | Historical Mean | N: 984 964 889 904 964
+Tick 7600 | Historical Mean | N: 982 862 695 854 872
+Tick 7700 | Historical Mean | N: 936 1000 907 961 899
+Tick 7800 | Historical Mean | N: 989 992 929 921 912
+Tick 7900 | Historical Mean | N: 989 899 924 927 941
+Disturbance at tick 8000: p0 1035 -> 412, K now 45.3001.
+Disturbance at tick 8000: p1 973 -> 387, K now 45.3001.
+Disturbance at tick 8000: p3 959 -> 382, K now 45.3001.
+Tick 8000 | 1970 | N: 45 48 874 43 886
+Tick 8001 | 1971 | N: 43 44 847 40 865
+Tick 8002 | 1972 | N: 46 45 845 38 862
+Tick 8003 | 1973 | N: 43 46 873 48 922
+Tick 8004 | 1974 | N: 43 45 816 41 861
+Tick 8005 | 1975 | N: 44 41 802 42 841
+Tick 8006 | 1976 | N: 45 42 767 36 842
+Tick 8007 | 1977 | N: 46 42 759 43 881
+Tick 8008 | 1978 | N: 47 42 770 46 882
+Tick 8009 | 1979 | N: 45 40 720 45 843
+Tick 8010 | 1980 | N: 45 40 688 43 841
+Tick 8011 | 1981 | N: 42 44 698 43 857
+Tick 8012 | 1982 | N: 42 44 702 46 768
+Tick 8013 | 1983 | N: 37 42 681 39 751
+Tick 8014 | 1984 | N: 43 39 637 47 764
+Tick 8015 | 1985 | N: 44 43 651 42 777
+Tick 8016 | 1986 | N: 44 44 666 39 751
+Tick 8017 | 1987 | N: 43 45 671 43 707
+Tick 8018 | 1988 | N: 45 40 621 40 694
+Tick 8019 | 1989 | N: 43 38 474 34 554
+Tick 8020 | 1990 | N: 37 40 374 33 505
+Tick 8021 | 1991 | N: 42 41 356 46 512
+Tick 8022 | 1992 | N: 42 36 323 38 502
+Tick 8023 | 1993 | N: 43 35 335 42 511
+Tick 8024 | 1994 | N: 34 35 187 27 373
+Tick 8025 | 1995 | N: 35 40 193 34 389
+Tick 8026 | 1996 | N: 36 37 198 28 407
+Tick 8027 | 1997 | N: 38 33 165 32 391
+Tick 8028 | 1998 | N: 39 32 157 41 363
+Tick 8029 | 1999 | N: 38 32 151 39 347
+Tick 8030 | 2000 | N: 32 30 104 27 273
+Tick 8031 | 2001 | N: 39 27 89 30 275
+Tick 8032 | 2002 | N: 36 30 83 30 259
+Tick 8033 | 2003 | N: 29 36 43 21 154
+Tick 8034 | 2004 | N: 26 32 46 13 146
+Tick 8035 | 2005 | N: 21 30 49 16 146
+Tick 8036 | 2006 | N: 17 33 59 14 139
+Tick 8037 | 2007 | N: 14 41 54 15 157
+Tick 8038 | 2008 | N: 15 42 53 11 165
+Tick 8039 | 2009 | N: 15 42 51 12 175
+Tick 8040 | 2010 | N: 13 40 55 10 173
+Tick 8041 | 2011 | N: 11 31 47 9 157
+Tick 8042 | 2012 | N: 11 30 44 4 153
+Tick 8043 | 2013 | N: 15 37 48 7 136
+Tick 8044 | 2014 | N: 11 38 53 5 117
+Tick 8045 | 2015 | N: 9 35 42 5 112
+Tick 8046 | 2016 | N: 7 37 46 7 100
+Tick 8047 | 2017 | N: 10 40 42 4 82
+Tick 8048 | 2018 | N: 15 30 35 3 58
+Tick 8049 | 2019 | N: 17 31 29 6 60
+Tick 8050 | 2020 | N: 9 33 27 4 61
+Tick 8051 | 2021 | N: 9 40 28 5 60
+Tick 8052 | 2022 | N: 3 27 15 3 41
+Tick 8053 | 2023 | N: 1 26 5 1 40
+Tick 8054 | 2024 | N: 1 25 3 0 40
+Tick 8055 | 2025 | N: 0 22 1 0 31
+Run 397 finished: /scratch/wwalli/TMP/ramp_v1.3.1_cluster/run_397_log.csv
