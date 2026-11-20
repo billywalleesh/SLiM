@@ -2,22 +2,27 @@
 #K, n_populations, pop_ids, K_per_pop, selection_strength, slope_decay, D_pop, n_target, target_pops, D_inds, D_habitat)
 #these each will be created with upper and lower limits, in order to create a random distribution of runs centered around a central 
 #expected value that produces essentially a run with a k per pop around an average of 500 inds. 
-#we expect an average run to have 6 pops, selection strength around .05, average destruction of pops around 0.5, average number of targeted populations around 3
+#we expect an average run to have 6 pops, selection strength around .10, average destruction of pops around 0.5, average number of targeted populations around 3
 #reduction of individuals to average around 0.5 and destruction of habitat to average around 0.5. K for the entire sim should average around 4000
 #important to set the seed here for all climate and migration matrices build from this
 #we will then supply this run matrix to the climate matrix code and the migration matrix code
 #each run will need a separate migration and climate matrix which corresponds to the number of populations sampled, as well as the specific city sampled 
-set.seed(14102026)
+#set.seed(14102026)
+set.seed(20112026)
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_20112026")
+getwd()
 
 #supply all the upper and lower limits
 K_max <- 5000 
 K_min <- 3000
 
-selection_strength_max <- 0.1
-selection_strength_min <- 0.01
+selection_strength_max <- 0.15
+selection_strength_min <- 0.05
 
 slope_max = -0.001/200
-slope_min   = -0.001/50
+#migration rate drops by 0.001 every 200 km and is 0 beyond 1000 km.
+slope_min   = -0.001/25
+#migration rate drops by 0.001 every 25 km and is 0 beyond 125 km. 
   
 n_populations_max <- 8
 n_populations_min <- 4
@@ -54,6 +59,7 @@ pop_ids
 #used to supply each initial population with a pop size
 K_per_pop = round(K / n_populations)
 K_per_pop
+mean(K_per_pop)
 
 D_pop = runif(1000, min = D_pop_min , max = D_pop_max) 
 D_pop

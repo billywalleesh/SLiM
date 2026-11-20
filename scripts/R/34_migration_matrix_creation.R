@@ -3,6 +3,9 @@
 
 library(sf)
 
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_20112026")
+getwd()
+
 ## the linear decay function (same as in 32_dispersal_decay_function.R)
 linear_decay = function(d, a, b) { # d is the distance value, a the intercept, b is the slope
   mr = a + d*b # migration rate simple linear regression of d

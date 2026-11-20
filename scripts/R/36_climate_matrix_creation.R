@@ -1,6 +1,8 @@
 #make one climate file for each run in run_matrix_1000.csv (made by 33_batch_matrix_creation.R)
 #each run gets only the columns for its own cities, in the same order as pop_ids
 #so column 1 of the climate file and row 1 of the migration file are the same city
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_20112026")
+getwd()
 
 ## load the run matrix
 run_matrix = read.csv("run_matrix_1000.csv")

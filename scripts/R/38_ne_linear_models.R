@@ -1,69 +1,105 @@
-#first linear models of the 1000 cluster runs
-#response: Ne at the end of the run (Ne_inb_end)
-#one row per population per run, from 37_combine_cluster_results.R
+#first lm of the SLiM simulation 
+#taken from results of ramp_v1.3.1_burnin50k 
 
-library(lme4) # for the mixed model at the end; install.packages("lme4") if you don't have it
+#import dataset 
+d <- read.csv("C:/Users/WilliamWallisch/msc_workspace/SLiM/results/ramp_v1.3.1_burnin50k/run_results_burnin50k.csv")
 
-## load the table
-dat = read.csv("C:/Users/WilliamWallisch/msc_workspace/SLiM/results/ramp_v1.3.1_cluster/analysis_table_1000.csv")
-dim(dat)
-length(unique(dat$run)) # should be 1000
+#first EDA
+head(d, 10)
+str(d)
+summary(d)
 
+#visualising the data
+par(mfrow = c(1, 3))
+hist(d$ne_indicator_pre_dist)
+hist(d$ne_indicator_dist)
+hist(d$ne_indicator_post_dist)
+par(mfrow = c(1, 1))
+hist(d$prop_extinct)
+hist(d$n_populations)
+hist(d$K_per_pop)
+hist(d$selection_strength)
+hist(d$slope_decay)
+hist(d$D_pop)
+hist(d$D_habitat)
+hist(d$n_target)
 
-## the response: Ne at the end
-#Ne is NA when a population has no individuals left (it cannot be estimated)
-#an extinct population has Ne = 0, so set those to 0 instead of dropping them
-dat$Ne_end = dat$Ne_inb_end
-dat$Ne_end[dat$N_end == 0] = 0
+boxplot(d$ne_indicator_pre_dist)
+boxplot(d$ne_indicator_dist)
+boxplot(d$ne_indicator_post_dist)
 
-sum(dat$extinct)      # number of extinct populations
-sum(is.na(dat$Ne_end)) # populations still NA (alive but too few parents to estimate Ne); lm leaves these out
+plot(d$ne_indicator_pre_dist, d$ne_indicator_post_dist)
+plot(d$ne_indicator_pre_dist, d$K_per_pop)
 
-hist(dat$Ne_end, breaks = 50, main = "Ne at the end of the run", xlab = "Ne_inb_end")
+qqnorm(d$ne_indicator_pre_dist)
+qqnorm(d$ne_indicator_dist)
+qqnorm(d$ne_indicator_post_dist)
+qqnorm(d$K_per_pop)
 
+#first lm
+m <- lm(ne_indicator_post_dist ~ ne_indicator_pre_dist, data= d)
+summary(m)
 
-## Model 1: the basic model
-#pop_ids and target_pops are text, so they are replaced by targeted (was this population hit?)
-#n_target is left out because it is round(D_pop * n_populations), so it repeats those two
-#D_pop is left out for the same reason: what it does to a population is captured by targeted
-m1 = lm(Ne_end ~ n_populations + K_per_pop + selection_strength + slope_decay +
-          D_inds + D_habitat + targeted, data = dat)
+qqnorm(resid(m))
+qqline(resid(m))
+
+par(mfrow = c(2, 2))
+plot(m)
+par(mfrow = c(1, 1))
+
+#data is looking a bit weird I will log transform the ne indicator values 
+sum(d$ne_indicator_pre_dist == 0, na.rm = TRUE)
+sum(d$ne_indicator_dist == 0, na.rm = TRUE)
+sum(d$ne_indicator_post_dist == 0, na.rm = TRUE)
+
+#log transform the ne indicators
+d$log_ne_pre  <- log(d$ne_indicator_pre_dist + 1)
+d$log_ne_dist <- log(d$ne_indicator_dist + 1)
+d$log_ne_post <- log(d$ne_indicator_post_dist + 1)
+
+head(d)
+
+hist(d$log_ne_pre)
+hist(d$log_ne_dist)
+hist(d$log_ne_post)
+
+m1 <- lm(log_ne_post ~ log_ne_pre, data= d)
 summary(m1)
 
+qqnorm(resid(m1))
+qqline(resid(m1))
 
-## Model 2: the disturbance only acts on the populations that were hit
-#D_inds (survival) and D_habitat (K left) only change a population if it was targeted,
-#so they enter as an interaction with targeted (targeted * D_inds)
-#
-#scale() puts every predictor on the same scale (mean 0, 1 = one standard deviation),
-#so the estimates can be compared: "Ne changes by this much for a 1 SD change in x"
-#(without it, slope_decay gets a huge number only because its values are tiny, e.g. -0.00001)
-m2 = lm(Ne_end ~ scale(n_populations) + scale(K_per_pop) + scale(selection_strength) +
-          scale(slope_decay) + targeted * (scale(D_inds) + scale(D_habitat)), data = dat)
+par(mfrow = c(2, 2))
+plot(m1)
+par(mfrow = c(1, 1))
+
+m2 <- lm(log_ne_post ~ log_ne_pre + K_per_pop + selection_strength + slope_decay + D_pop + D_inds + D_habitat + disturbance_type, data= d)
 summary(m2)
+anova(m2)
 
-#check the model: residuals should look like random scatter around 0
+qqnorm(resid(m2))
+qqline(resid(m2))
+
 par(mfrow = c(2, 2))
 plot(m2)
 par(mfrow = c(1, 1))
 
-
-## Model 3: populations from the same run are not independent
-#they share every run setting and exchange migrants, so run is added as a random effect
-m3 = lmer(Ne_end ~ scale(n_populations) + scale(K_per_pop) + scale(selection_strength) +
-            scale(slope_decay) + targeted * (scale(D_inds) + scale(D_habitat)) + (1 | run),
-          data = dat)
+m3 <- lm(extinct ~ ne_indicator_pre_dist + K_per_pop + selection_strength + slope_decay + D_pop + D_inds + D_habitat + disturbance_type, data= d)
 summary(m3)
 
+qqnorm(resid(m3))
+qqline(resid(m3))
 
-## Model 4: does Ne before the climate change predict Ne at the end?
-m4 = lm(Ne_end ~ scale(Ne_inb_before) + scale(selection_strength) + scale(slope_decay) +
-          targeted * (scale(D_inds) + scale(D_habitat)), data = dat)
+par(mfrow = c(2, 2))
+plot(m3)
+par(mfrow = c(1, 1))
+
+m4 <- lm(extinct ~ log_ne_pre + K_per_pop + selection_strength + slope_decay + D_pop + D_inds + D_habitat + disturbance_type, data= d)
 summary(m4)
 
+qqnorm(resid(m4))
+qqline(resid(m4))
 
-## a warning before interpreting Ne: how close is it to N and K?
-cor(dat$Ne_inb_before, dat$N_before)  # Ne vs census N before
-cor(dat$Ne_inb_before, dat$K_per_pop) # Ne vs K before
-plot(dat$N_before, dat$Ne_inb_before, xlab = "N before", ylab = "Ne_inb before")
-abline(0, 1, col = "red") # the 1:1 line
+par(mfrow = c(2, 2))
+plot(m4)
+par(mfrow = c(1, 1))
