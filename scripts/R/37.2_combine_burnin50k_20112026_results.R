@@ -7,7 +7,9 @@
 #    ne_indicator_pre_dist   tick 53999, the generation before the disturbance
 #    ne_indicator_dist       tick 54000 (1970), right after the disturbance
 #    ne_indicator_post_dist  the last tick of the run (2025)
-#  extinct = TRUE if at least one population went extinct by the end of the run (2025, or earlier if every population died)
+#  extinct = TRUE only if EVERY population of the run is gone by the end (the whole metapopulation / species is extinct)
+#            (changed 25.11.2026 after talking to my supervisor, before it meant at least one population was gone)
+#  any_pop_extinct = TRUE if at least one population went extinct by the end (the old definition, kept as a check)
 #  prop_extinct = proportion of populations that went extinct (continuous version, as a check)
 #the logs only have a few ticks: every 100 ticks of the ramp, every 1000 ticks of the burn-in,
 #53999 (before), 54000 (disturbance, 1970) and every year to 2025
@@ -72,20 +74,24 @@ for (r in unique(all_logs$run)) {
   ne_indicator_dist = ne_indicator(disturb$N)
   ne_indicator_post_dist = ne_indicator(end$N)
   
-  #extinct: TRUE if at least one population has no individuals left at the end
-  extinct = any(end$N == 0)
+  #extinct: TRUE only if every population has no individuals left at the end = the whole metapopulation is gone
+  extinct = all(end$N == 0)
+  
+  #the old definition, kept as a check: TRUE if at least one population has no individuals left at the end
+  any_pop_extinct = any(end$N == 0)
   
   #continuous version: proportion of populations that went extinct
   prop_extinct = mean(end$N == 0)
   
   run_results = rbind(run_results, data.frame(run = r, ne_indicator_pre_dist, ne_indicator_dist,
-                                              ne_indicator_post_dist, extinct, prop_extinct,
+                                              ne_indicator_post_dist, extinct, any_pop_extinct, prop_extinct,
                                               end_year = end$year[1]))
 }
 
 head(run_results)
 nrow(run_results)            # should be 1000
-table(run_results$extinct)   # how many runs had at least one population go extinct
+table(run_results$extinct)   # how many runs lost the whole metapopulation
+table(run_results$any_pop_extinct) # how many runs lost at least one population (old definition)
 table(run_results$end_year)  # most runs end in 2025, the others had every population die out earlier
 
 #how the indicator changes over time
@@ -108,7 +114,7 @@ m = glm(extinct ~ ne_indicator_pre_dist, family = binomial, data = run_results)
 summary(m)
 
 #how the indicator and extinction look together
-boxplot(ne_indicator_pre_dist ~ extinct, data = run_results, xlab = "at least one population extinct", ylab = "ne indicator before the disturbance (proportion of populations above Ne 500)")
+boxplot(ne_indicator_pre_dist ~ extinct, data = run_results, xlab = "metapopulation extinct", ylab = "ne indicator before the disturbance (proportion of populations above Ne 500)")
 
 #the indicator at the three times, one line per run (first 100 runs)
 plot(NULL, xlim = c(1, 3), ylim = c(0, 1), xaxt = "n",

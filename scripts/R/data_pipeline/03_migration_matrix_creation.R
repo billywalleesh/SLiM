@@ -3,7 +3,7 @@
 
 library(sf)
 
-setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_20112026")
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_25112026")
 getwd()
 
 ## the linear decay function (same as in 32_dispersal_decay_function.R)

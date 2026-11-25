@@ -8,17 +8,28 @@
 #we will then supply this run matrix to the climate matrix code and the migration matrix code
 #each run will need a separate migration and climate matrix which corresponds to the number of populations sampled, as well as the specific city sampled 
 #set.seed(14102026)
-set.seed(20112026)
-setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_20112026")
+#set.seed(20112026)
+set.seed(25112026)
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_25112026")
 getwd()
 
 #supply all the upper and lower limits
 K_max <- 5000 
 K_min <- 3000
 
-selection_strength_max <- 0.15
-selection_strength_min <- 0.05
+#batch 1
+#selection_strength_max <- 0.1
+#selection_strength_min <- 0.01
+#batch 2
+#selection_strength_max <- 0.15
+#selection_strength_min <- 0.05
+#batch 3
+selection_strength_max <- 0.25
+selection_strength_min <- 0.10
 
+#batch 1
+#slope_max = -0.001/200
+#slope_min   = -0.001/50
 slope_max = -0.001/200
 #migration rate drops by 0.001 every 200 km and is 0 beyond 1000 km.
 slope_min   = -0.001/25

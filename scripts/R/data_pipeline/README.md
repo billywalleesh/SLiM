@@ -11,7 +11,7 @@ does not matter which folder it sits in.
 | 03_migration_matrix_creation.R | 34_migration_matrix_creation.R | one migration matrix per run, from city distances and the run's slope |
 | 04_climate_matrix_creation.R | 36_climate_matrix_creation.R | one climate matrix per run, for the run's cities |
 | (cluster) | | run_repo_<date>/run_array_burnin50k.sh runs ramp_v1.3.1_burnin50k.slim once per row |
-| 05_combine_results.R | 37.1_combine_burnin50k_results.R | logs -> run_results (one row per run: Ne indicators, extinct, run settings) |
+| 05_combine_results.R | 37.1_combine_burnin50k_results.R | logs -> run_results (one row per run: Ne indicators, extinct, any_pop_extinct, run settings) |
 | 06_build_run_summary.R | 42_build_run_summary.R | run_results + logs -> run_summary (census N, Ne, % kept, % K occupied) |
 
 ## batches
@@ -34,3 +34,5 @@ Same model (ramp_v1.3.1_burnin50k.slim) in both.
   run_matrix_file and the output file names for batch 2.
 - 05 still has the old batch 1 run matrix path (run_repo/14102026/). That folder is now
   run_repo_14102026/14102026/.
+- extinct (from 05) means the whole metapopulation is gone: every population of the run has N = 0 at the end.
+  Changed 25.11.2026. The old meaning (at least one population gone) is kept as any_pop_extinct.
