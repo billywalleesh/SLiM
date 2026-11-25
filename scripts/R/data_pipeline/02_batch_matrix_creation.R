@@ -7,11 +7,13 @@
 #important to set the seed here for all climate and migration matrices build from this
 #we will then supply this run matrix to the climate matrix code and the migration matrix code
 #each run will need a separate migration and climate matrix which corresponds to the number of populations sampled, as well as the specific city sampled 
+#(0.10–0.25 gave about 20% extinction at 0.17–0.23, and runs above 0.24 died in the burn-in) that is the reasoning for batch 4 selection strength
 #set.seed(14102026)
 #set.seed(20112026)
 #set.seed(25112026)
-set.seed(251120261)
-setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_251120261")
+#set.seed(251120261)
+set.seed(251120262)
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_251120262")
 getwd()
 
 #supply all the upper and lower limits
@@ -28,7 +30,10 @@ K_min <- 3000
 #selection_strength_max <- 0.25
 #selection_strength_min <- 0.10
 #batch 4
-selection_strength_max <- 0.23
+#selection_strength_max <- 0.23
+#selection_strength_min <- 0.17
+#batch 5
+selection_strength_max <- 0.20
 selection_strength_min <- 0.17
 
 #batch 1
