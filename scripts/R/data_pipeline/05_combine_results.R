@@ -4,26 +4,31 @@
 #  (the GBF Ne 500 indicator: 1 = every population is above 500, 0 = none are)
 #  Ne is taken as census N for now: mating is random and reproduction is Poisson
 #  (fecunditySkewSD = 0), so Ne is close to N (Ne_inb / N is about 1)
-#    ne_indicator_pre_dist   tick 53999, the generation before the disturbance
-#    ne_indicator_dist       tick 54000 (1970), right after the disturbance
+#    ne_indicator_pre_dist   tick_before (53999 with the 4000-tick ramp), the generation before the disturbance
+#    ne_indicator_dist       tick_disturb (54000, 1970), right after the disturbance
 #    ne_indicator_post_dist  the last tick of the run (2025)
 #  extinct = TRUE only if EVERY population of the run is gone by the end (the whole metapopulation / species is extinct)
 #            (changed 25.11.2026 after talking to my supervisor, before it meant at least one population was gone)
 #  any_pop_extinct = TRUE if at least one population went extinct by the end (the old definition, kept as a check)
 #  prop_extinct = proportion of populations that went extinct (continuous version, as a check)
-#  dead_before_1970 = TRUE if every population died before the disturbance (tick 54000), e.g. in the ramp
-#            these runs never saw the disturbance or the climate change, so extinct, any_pop_extinct and
-#            prop_extinct are set to NA for them (glm drops NA rows, so they stay out of the models)
+#  dead_before_1970 = TRUE if every population died before the disturbance (tick_disturb), e.g. in the ramp
+#            these runs never saw the disturbance or the climate change, so ne_indicator_post_dist, extinct,
+#            any_pop_extinct and prop_extinct are set to NA for them (glm drops NA rows, so they stay out of the models)
 #the logs only have a few ticks: every 100 ticks of the ramp, every 1000 ticks of the burn-in,
-#53999 (before), 54000 (disturbance, 1970) and every year to 2025
+#tick_before, tick_disturb (1970) and every year to 2025
 
 ## folders
 log_folder = "C:/Users/WilliamWallisch/msc_workspace/SLiM/results/ramp_v1.3.1_burnin50k"
 run_matrix_file = "C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo/14102026/run_matrix_1000.csv"
 
 ## constants
-tick_before = 53999  # the generation before the disturbance
-tick_disturb = 54000 # the disturbance (1970) and the start of the climate change, logged after the cull
+#the ticks depend on how long the ramp is in the model that made the logs:
+#  ramp_v1.3.1_burnin50k.slim (batches 1 to 4):          ramp_length = 4000  -> ticks 53999, 54000, 54055
+#  ramp_v1.3.1_burnin50k_ramp10k.slim (10,000-tick ramp): ramp_length = 10000 -> ticks 59999, 60000, 60055
+ramp_length = 4000
+burnin_length = 50000 # the same in both models
+tick_disturb = ramp_length + burnin_length # the disturbance (1970) and the start of the climate change, logged after the cull
+tick_before = tick_disturb - 1                # the generation before the disturbance
 ne_threshold = 500
 
 ## find the log files
@@ -89,6 +94,7 @@ for (r in unique(all_logs$run)) {
   #did the run die before the disturbance? then it has no 1970 rows and the extinction is not from the climate change
   dead_before_1970 = max(one_run$cycle) < tick_disturb
   if (dead_before_1970) {
+    ne_indicator_post_dist = NA
     extinct = NA
     any_pop_extinct = NA
     prop_extinct = NA
@@ -131,7 +137,7 @@ boxplot(ne_indicator_pre_dist ~ extinct, data = run_results, xlab = "metapopulat
 #the indicator at the three times, one line per run (first 100 runs)
 plot(NULL, xlim = c(1, 3), ylim = c(0, 1), xaxt = "n",
      xlab = "", ylab = "ne indicator (proportion of populations above Ne 500)", main = "indicator over time")
-axis(1, at = 1:3, labels = c("before (53999)", "disturbance (1970)", "end (2025)"))
+axis(1, at = 1:3, labels = c(paste0("before (", tick_before, ")"), "disturbance (1970)", "end (2025)"))
 for (i in 1:min(100, nrow(run_results))) {
   lines(1:3, jitter(unlist(run_results[i, c("ne_indicator_pre_dist", "ne_indicator_dist", "ne_indicator_post_dist")]), amount = 0.01),
         col = ifelse(run_results$extinct[i], "red", "grey40"))

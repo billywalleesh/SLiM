@@ -20,9 +20,17 @@ does not matter which folder it sits in.
 |---|---|---|---|
 | 1 | 14102026 | input/.../run_repo_14102026/14102026/ | results/ramp_v1.3.1_burnin50k/ |
 | 2 | 20112026 | input/.../run_repo_20112026/ | results/ramp_v1.3.1_burnin50k_20112026/ |
+| 3 pilot | 25112026 | input/.../run_repo_25112026/ | results/ramp_v1.3.1_burnin50k_25112026/ (100 runs) |
+| 3 | 251120261 | input/.../run_repo_251120261/ | results/ramp_v1.3.1_burnin50k_251120261/ |
+| 4 | 251120262 | input/.../run_repo_251120262/ | results/ramp_v1.3.1_burnin50k_251120262/ |
 
 Batch 1: selection 0.01 to 0.1, slope_min -0.001/50. Batch 2: selection 0.05 to 0.15, slope_min -0.001/25.
-Same model (ramp_v1.3.1_burnin50k.slim) in both.
+Batch 3 pilot: selection 0.10 to 0.25. Batch 3: selection 0.17 to 0.23 (12 of 1000 runs died in the ramp).
+Batch 4: selection 0.17 to 0.20 (3 of 1000 runs died in the ramp). Same model (ramp_v1.3.1_burnin50k.slim) in all of them.
+
+ramp_v1.3.1_burnin50k_ramp10k.slim is the same model with a 10,000-tick ramp instead of 4000 (climate starts at tick 60000
+instead of 54000), made because some runs died at the end of the 4000-tick ramp. Tested first in run_repo_ramp10k_test/
+by rerunning the 15 runs of batches 3 and 4 that died in the ramp.
 
 ## notes
 
@@ -36,3 +44,6 @@ Same model (ramp_v1.3.1_burnin50k.slim) in both.
   run_repo_14102026/14102026/.
 - extinct (from 05) means the whole metapopulation is gone: every population of the run has N = 0 at the end.
   Changed 25.11.2026. The old meaning (at least one population gone) is kept as any_pop_extinct.
+- 05 and 06 work out the ticks (before, disturbance, 2025) from ramp_length at the top: 4000 for batches 1 to 4
+  (ramp_v1.3.1_burnin50k.slim), 10000 for logs from ramp_v1.3.1_burnin50k_ramp10k.slim. Wrong ramp_length = no rows found.
+- 05 sets dead_before_1970 = TRUE for runs that died before the disturbance; their extinct is NA so they stay out of the models.

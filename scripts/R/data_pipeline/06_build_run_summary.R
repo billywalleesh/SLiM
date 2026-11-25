@@ -4,8 +4,9 @@
 #run_results_burnin50k.csv itself is not changed
 #
 #new columns (all for the whole metapopulation, N summed over the demes):
-#  n_pre_dist, n_1970, n_2025         census size before the disturbance (tick 53999), just after it (54000), and in 2025 (54055)
-#                                     tick 54000 is logged AFTER the disturbance is applied, so n_1970 already has the hit in it
+#  n_pre_dist, n_1970, n_2025         census size before the disturbance (tick_before), just after it (tick_disturb), and in 2025 (tick_end)
+#                                     (53999, 54000 and 54055 with the 4000-tick ramp, 59999, 60000 and 60055 with the 10,000-tick ramp)
+#                                     tick_disturb is logged AFTER the disturbance is applied, so n_1970 already has the hit in it
 #  ne_inb_pre_dist, ne_inb_dist, ne_inb_2025
 #                                     inbreeding Ne of the metapopulation at the same three ticks
 #  ne_het_pre_dist, ne_het_dist, ne_het_2025
@@ -25,9 +26,14 @@ results_file = file.path(log_folder, "run_results_burnin50k.csv")
 summary_file = file.path(log_folder, "run_summary_burnin50k.csv")
 
 ## constants
-tick_before = 53999  # the generation before the disturbance
-tick_disturb = 54000 # the disturbance (1970), logged after it is applied
-tick_end = 54055     # 2025
+#the ticks depend on how long the ramp is in the model that made the logs:
+#  ramp_v1.3.1_burnin50k.slim (batches 1 to 4):          ramp_length = 4000  -> ticks 53999, 54000, 54055
+#  ramp_v1.3.1_burnin50k_ramp10k.slim (10,000-tick ramp): ramp_length = 10000 -> ticks 59999, 60000, 60055
+ramp_length = 4000
+burnin_length = 50000 # the same in both models
+tick_disturb = ramp_length + burnin_length # the disturbance (1970), logged after it is applied
+tick_before = tick_disturb - 1                # the generation before the disturbance
+tick_end = tick_disturb + 55                  # 2025
 
 ## find the log files
 log_files = list.files(log_folder, pattern = "^run_[0-9]+_log.csv$", full.names = TRUE)

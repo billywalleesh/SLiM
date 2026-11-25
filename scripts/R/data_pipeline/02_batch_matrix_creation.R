@@ -8,6 +8,7 @@
 #we will then supply this run matrix to the climate matrix code and the migration matrix code
 #each run will need a separate migration and climate matrix which corresponds to the number of populations sampled, as well as the specific city sampled 
 #(0.10–0.25 gave about 20% extinction at 0.17–0.23, and runs above 0.24 died in the burn-in) that is the reasoning for batch 4 selection strength
+#batch 5: selection was capped at 0.20 because batch 3 lost 12 runs in the ramp, all but one above 0.20
 #set.seed(14102026)
 #set.seed(20112026)
 #set.seed(25112026)
