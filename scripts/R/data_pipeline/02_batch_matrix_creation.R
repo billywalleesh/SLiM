@@ -9,12 +9,15 @@
 #each run will need a separate migration and climate matrix which corresponds to the number of populations sampled, as well as the specific city sampled 
 #(0.10–0.25 gave about 20% extinction at 0.17–0.23, and runs above 0.24 died in the burn-in) that is the reasoning for batch 4 selection strength
 #batch 5: selection was capped at 0.20 because batch 3 lost 12 runs in the ramp, all but one above 0.20
+#batch 6: back to 0.17-0.23 with the 10,000-tick ramp (ramp_v1.3.1_burnin50k_ramp10k.slim), which saved 14 of the 15 runs
+#that died in the 4000-tick ramp (run_repo_ramp10k_test)
 #set.seed(14102026)
 #set.seed(20112026)
 #set.seed(25112026)
 #set.seed(251120261)
-set.seed(251120262)
-setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_251120262")
+#set.seed(251120262)
+set.seed(251120263)
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_251120263")
 getwd()
 
 #supply all the upper and lower limits
@@ -34,7 +37,10 @@ K_min <- 3000
 #selection_strength_max <- 0.23
 #selection_strength_min <- 0.17
 #batch 5
-selection_strength_max <- 0.20
+#selection_strength_max <- 0.20
+#selection_strength_min <- 0.17
+#batch 6 (10,000-tick ramp)
+selection_strength_max <- 0.23
 selection_strength_min <- 0.17
 
 #batch 1
