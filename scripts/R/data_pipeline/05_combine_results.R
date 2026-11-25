@@ -11,6 +11,9 @@
 #            (changed 25.11.2026 after talking to my supervisor, before it meant at least one population was gone)
 #  any_pop_extinct = TRUE if at least one population went extinct by the end (the old definition, kept as a check)
 #  prop_extinct = proportion of populations that went extinct (continuous version, as a check)
+#  dead_before_1970 = TRUE if every population died before the disturbance (tick 54000), e.g. in the ramp
+#            these runs never saw the disturbance or the climate change, so extinct, any_pop_extinct and
+#            prop_extinct are set to NA for them (glm drops NA rows, so they stay out of the models)
 #the logs only have a few ticks: every 100 ticks of the ramp, every 1000 ticks of the burn-in,
 #53999 (before), 54000 (disturbance, 1970) and every year to 2025
 
@@ -82,15 +85,24 @@ for (r in unique(all_logs$run)) {
 
   #continuous version: proportion of populations that went extinct
   prop_extinct = mean(end$N == 0)
+  
+  #did the run die before the disturbance? then it has no 1970 rows and the extinction is not from the climate change
+  dead_before_1970 = max(one_run$cycle) < tick_disturb
+  if (dead_before_1970) {
+    extinct = NA
+    any_pop_extinct = NA
+    prop_extinct = NA
+  }
 
   run_results = rbind(run_results, data.frame(run = r, ne_indicator_pre_dist, ne_indicator_dist,
-                                              ne_indicator_post_dist, extinct, any_pop_extinct, prop_extinct,
+                                              ne_indicator_post_dist, extinct, any_pop_extinct, prop_extinct, dead_before_1970,
                                               end_year = end$year[1]))
 }
 
 head(run_results)
 nrow(run_results)            # should be 1000
-table(run_results$extinct)   # how many runs lost the whole metapopulation
+table(run_results$dead_before_1970) # how many runs died before the disturbance (should be 0 or close to it)
+table(run_results$extinct, useNA = "ifany")   # how many runs lost the whole metapopulation (NA = died before 1970)
 table(run_results$any_pop_extinct) # how many runs lost at least one population (old definition)
 table(run_results$end_year)  # most runs end in 2025, the others had every population die out earlier
 

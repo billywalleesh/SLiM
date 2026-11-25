@@ -9,8 +9,9 @@
 #each run will need a separate migration and climate matrix which corresponds to the number of populations sampled, as well as the specific city sampled 
 #set.seed(14102026)
 #set.seed(20112026)
-set.seed(25112026)
-setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_25112026")
+#set.seed(25112026)
+set.seed(251120261)
+setwd("C:/Users/WilliamWallisch/msc_workspace/SLiM/input/grib_pop_index_local_adaptation/run_repo_251120261")
 getwd()
 
 #supply all the upper and lower limits
@@ -24,8 +25,11 @@ K_min <- 3000
 #selection_strength_max <- 0.15
 #selection_strength_min <- 0.05
 #batch 3
-selection_strength_max <- 0.25
-selection_strength_min <- 0.10
+#selection_strength_max <- 0.25
+#selection_strength_min <- 0.10
+#batch 4
+selection_strength_max <- 0.23
+selection_strength_min <- 0.17
 
 #batch 1
 #slope_max = -0.001/200
